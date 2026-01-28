@@ -1,0 +1,202 @@
+import os
+import sys
+import yaml
+import argparse
+import torch
+import torch.nn.functional as F
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from src.dataset import TennisDataset
+from src.model import HDGCN_Tennis
+
+def load_config(config_path):
+    """Load YAML configuration file"""
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
+
+def load_data(data_processed_dir):
+    """Load processed data and label map"""
+    try:
+        X = np.load(os.path.join(data_processed_dir, 'X.npy'))
+        y = np.load(os.path.join(data_processed_dir, 'y.npy'))
+        label_map = np.load(os.path.join(data_processed_dir, 'label_map.npy'), allow_pickle=True).item()
+        return X, y, label_map
+    except FileNotFoundError as e:
+        print(f"ERROR loading data: {e}")
+        sys.exit(1)
+
+def plot_confusion_matrix(y_true, y_pred, class_names, save_path):
+    """Generate and save confusion matrix"""
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=class_names, yticklabels=class_names,
+                cbar_kws={'label': 'Count'})
+    plt.xlabel('Predicted Class', fontsize=12)
+    plt.ylabel('True Class', fontsize=12)
+    plt.title('Confusion Matrix - HD-GCN (with TTA)', fontsize=14, fontweight='bold')
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+
+def apply_tta(model, inputs, device, tta_augmentations):
+    """Apply Test Time Augmentation with multiple passes"""
+    all_probs = []
+    
+    # Original pass
+    with torch.no_grad():
+        output = model(inputs)
+        prob = F.softmax(output, dim=1)
+        all_probs.append(prob)
+    
+    # TTA augmentations
+    for aug_config in tta_augmentations:
+        scale = aug_config.get('scale', 1.0)
+        noise = aug_config.get('noise', 0.0)
+        
+        inputs_aug = inputs.clone()
+        
+        # Apply scaling to X, Y coordinates (channels 0, 1)
+        if scale != 1.0:
+            inputs_aug[:, :2, :, :] *= scale
+        
+        # Apply noise to X, Y coordinates
+        if noise > 0:
+            noise_tensor = torch.randn_like(inputs_aug[:, :2, :, :]) * noise
+            inputs_aug[:, :2, :, :] += noise_tensor
+        
+        with torch.no_grad():
+            output = model(inputs_aug)
+            prob = F.softmax(output, dim=1)
+            all_probs.append(prob)
+    
+    # Ensemble: average all predictions
+    avg_prob = torch.stack(all_probs).mean(dim=0)
+    return avg_prob
+
+def main(config_path):
+    """Main evaluation function with TTA"""
+    # Load configuration
+    config = load_config(config_path)
+    data_config = config['data']
+    output_config = config['output']
+    evaluation_config = config['evaluation']
+    model_config = config['model_hyperparameters']
+    
+    DATA_PROCESSED_DIR = data_config['processed_dir']
+    MODEL_SAVE_PATH = output_config['model_save_path']
+    EVALUATION_DIR = output_config['evaluation_dir']
+    BATCH_SIZE = evaluation_config['batch_size']
+    TTA_ENABLED = evaluation_config['tta_enabled']
+    TTA_AUGMENTATIONS = evaluation_config['tta_augmentations']
+    IN_CHANNELS = model_config['in_channels']
+    RANDOM_SEED = config['training']['random_seed']
+    
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    os.makedirs(EVALUATION_DIR, exist_ok=True)
+    
+    print(f"\n{'='*60}")
+    print(f"Starting Evaluation on: {DEVICE}")
+    print(f"TTA Enabled: {TTA_ENABLED}")
+    print(f"{'='*60}\n")
+    
+    # 1. Load data
+    X, y, label_map = load_data(DATA_PROCESSED_DIR)
+    num_classes = len(label_map)
+    
+    # Invert label map: {class_name: idx} -> {idx: class_name}
+    idx_to_label = {v: k for k, v in label_map.items()}
+    class_names = [idx_to_label[i] for i in range(num_classes)]
+    
+    print(f"Loaded {X.shape[0]} samples with {num_classes} classes")
+    
+    # 2. Reconstruct test split (identical to training: seed 42)
+    _, X_test, _, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=RANDOM_SEED, stratify=y
+    )
+    print(f"Test set: {len(X_test)} samples\n")
+    
+    # 3. Create test dataset and dataloader
+    test_dataset = TennisDataset(X_test, y_test, augment=False)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+    
+    # 4. Load model
+    model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=0.5)
+    
+    if not os.path.exists(MODEL_SAVE_PATH):
+        print(f"ERROR: Model not found at {MODEL_SAVE_PATH}")
+        return
+    
+    model.load_state_dict(torch.load(MODEL_SAVE_PATH, map_location=DEVICE))
+    model.to(DEVICE)
+    model.eval()
+    print(f"Model loaded successfully\n")
+    
+    # 5. Inference with TTA
+    all_preds = []
+    all_labels = []
+    
+    if TTA_ENABLED:
+        print(f"Running TTA with {len(TTA_AUGMENTATIONS) + 1} passes (original + {len(TTA_AUGMENTATIONS)} augmentations)...")
+    else:
+        print("Running standard inference...")
+    
+    with torch.no_grad():
+        for inputs, labels in tqdm(test_loader, desc="Evaluation"):
+            inputs = inputs.to(DEVICE)
+            
+            if TTA_ENABLED:
+                avg_prob = apply_tta(model, inputs, DEVICE, TTA_AUGMENTATIONS)
+            else:
+                output = model(inputs)
+                avg_prob = F.softmax(output, dim=1)
+            
+            _, predicted = torch.max(avg_prob, 1)
+            all_preds.extend(predicted.cpu().numpy())
+            all_labels.extend(labels.numpy())
+    
+    # 6. Compute metrics
+    accuracy = accuracy_score(all_labels, all_preds)
+    report = classification_report(all_labels, all_preds, target_names=class_names)
+    
+    # 7. Print and save results
+    print("\n" + "="*60)
+    print(f" EVALUATION RESULTS {'(with TTA)' if TTA_ENABLED else '(Standard)'}")
+    print("="*60)
+    print(f"\nOverall Accuracy: {accuracy:.4f}\n")
+    print(report)
+    print("="*60)
+    
+    # Save report
+    report_path = os.path.join(EVALUATION_DIR, f"report_{'tta' if TTA_ENABLED else 'standard'}.txt")
+    with open(report_path, 'w') as f:
+        f.write(f"Accuracy: {accuracy:.4f}\n")
+        f.write(f"TTA Enabled: {TTA_ENABLED}\n\n")
+        f.write(report)
+    
+    # Save confusion matrix
+    cm_path = os.path.join(EVALUATION_DIR, f"confusion_matrix_{'tta' if TTA_ENABLED else 'standard'}.png")
+    plot_confusion_matrix(all_labels, all_preds, class_names, cm_path)
+    
+    print(f"\nResults saved to: {EVALUATION_DIR}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Evaluate model with optional Test Time Augmentation (TTA)')
+    parser.add_argument('--config', type=str, default='config.yaml',
+                        help='Path to config YAML file (default: config.yaml)')
+    args = parser.parse_args()
+    
+    main(args.config)
