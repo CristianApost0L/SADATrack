@@ -1,6 +1,111 @@
-# Swing Classifier Configuration
+# Tennis Ball Tracking Configuration
+# ===================================
 
-# Directory paths
+# Model paths
+models:
+  ball_tracker: "models/ball_tracker.pt"
+  court_detector: "models/court_detector.pt"
+  bounce_detector: "models/bounce_detector.cbm"
+  pose_extractor: "models/yolo11n-pose.pt"
+
+# Detection parameters
+detection:
+  ball:
+    input_channels: 9  # 3 consecutive frames
+    output_channels: 256
+    width: 640
+    height: 360
+    confidence_threshold: 0.5
+    max_distance: 80  # pixels
+    
+  court:
+    output_width: 640
+    output_height: 360
+    scale_factor: 2
+    heatmap_threshold: 170
+    circle_detection:
+      dp: 1
+      min_dist: 20
+      param1: 50
+      param2: 2
+      min_radius: 10
+      max_radius: 25
+      
+  bounce:
+    catboost:
+      threshold: 0.45
+      smooth: true
+      interpolation_frames: 5
+      max_extrapolation_attempts: 3
+      
+    physics:
+      fps: 30
+      y_threshold: 75  # minimum Y coordinate for valid bounces
+      smooth_window: 3
+      prominence: 1.0
+      offset_correction: -4
+      verbose: true
+      
+  person:
+    confidence_threshold: 0.85
+    filter_players: true
+    
+# Court reference parameters
+court:
+  # Real world dimensions (meters)
+  length: 23.77
+  width: 10.97
+  service_line_depth: 6.40
+  baseline_depth: 11.89
+  
+  # Reference image coordinates (pixels)
+  pixel_per_meter: 100.0
+  net_y: 1748
+  center_x: 832.5
+  
+# Video processing
+video:
+  max_frames: null  # null for all frames
+  skip_frames: 0
+  resize_factor: 1.0
+  
+# Output settings
+output:
+  save_intermediate: true
+  generate_video: false  # Set to true to generate overlay video
+  video_quality: "high"  # high, medium, low
+  
+# Evaluation
+evaluation:
+  tolerance_before: 2  # frames
+  tolerance_after: 6   # frames
+  beta: 1.5  # F-beta score (>1 favors recall)
+  
+# Advanced settings
+advanced:
+  device: "auto"  # auto, cuda, cpu
+  batch_size: 1
+  num_workers: 4
+  memory_efficient: true
+  
+  # Debugging
+  debug:
+    save_heatmaps: false
+    save_detections: false
+    verbose_logging: false
+    
+  # Performance
+  performance:
+    use_half_precision: false
+    optimize_inference: true
+    
+# Scene detection (for long videos)
+scene_detection:
+  enabled: false
+  content_threshold: 30.0
+  min_scene_length: 30  # frames
+
+# Legacy swing classifier config (maintained for compatibility)
 data:
   raw_dir: 'data/raw/Video RGB'
   processed_dir: 'data/processed'
