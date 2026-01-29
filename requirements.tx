@@ -1,8 +1,0 @@
-numpy
-opencv-python
-torch
-ultralytics
-tqdm
-matplotlib
-scikit-learn
-pyyaml
