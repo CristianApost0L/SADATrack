@@ -44,6 +44,8 @@ model_hyperparameters:
 output:
   model_save_path: 'models/best_model_hdgcn.pth'
   plots_output_dir: 'runs'
+  analysis_output_dir: 'runs/analysis'
+  folds_output_dir: 'runs/kfold_results'
   evaluation_dir: 'runs/evaluation_tta'
   checkpoints_dir: 'models/checkpoints'
 

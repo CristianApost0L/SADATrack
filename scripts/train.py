@@ -108,11 +108,11 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
     
     # Modify paths if k-fold
     if fold_idx is not None:
+        fold_base = output_config.get('folds_output_dir', 'runs/kfold_results')
         model_name, ext = os.path.splitext(output_config['model_save_path'])
-        MODEL_SAVE_PATH = f"{model_name}_fold{fold_idx}{ext}"
-        PLOTS_OUTPUT_DIR = os.path.join(output_config['plots_output_dir'], f'fold_{fold_idx}')
-        checkpoint_base = output_config.get('checkpoints_dir', 'models/checkpoints')
-        CHECKPOINTS_DIR = os.path.join(checkpoint_base, f'fold_{fold_idx}')
+        MODEL_SAVE_PATH = os.path.join(fold_base, f'fold_{fold_idx}', f'best_model_hdgcn{ext}')
+        PLOTS_OUTPUT_DIR = os.path.join(fold_base, f'fold_{fold_idx}', 'plots')
+        CHECKPOINTS_DIR = os.path.join(fold_base, f'fold_{fold_idx}', 'checkpoints')
         print(f"\n{'='*20} Starting Fold {fold_idx} {'='*20}")
     else:
         MODEL_SAVE_PATH = output_config['model_save_path']

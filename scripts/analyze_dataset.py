@@ -20,8 +20,10 @@ def analyze_dataset(config_path):
     # Load configuration
     config = load_config(config_path)
     data_config = config['data']
+    output_config = config['output']
     
     DATA_PROCESSED_DIR = data_config['processed_dir']
+    ANALYSIS_OUTPUT_DIR = output_config.get('analysis_output_dir', 'runs/analysis')
     
     # Load data
     X_path = os.path.join(DATA_PROCESSED_DIR, 'X.npy')
@@ -82,11 +84,11 @@ def analyze_dataset(config_path):
     print(f"{'='*60}\n")
     
     # Create visualization
-    create_distribution_plot(label_map, counts)
+    create_distribution_plot(label_map, counts, ANALYSIS_OUTPUT_DIR)
 
-def create_distribution_plot(label_map, counts):
+def create_distribution_plot(label_map, counts, output_dir='runs/analysis'):
     """Create and save class distribution plot"""
-    os.makedirs('runs', exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     
     # Invert label_map: from {class_name: index} to {index: class_name}
     index_to_name = {v: k for k, v in label_map.items()}
@@ -109,8 +111,8 @@ def create_distribution_plot(label_map, counts):
     plt.xticks(rotation=45, ha='right')
     
     plt.tight_layout()
-    plt.savefig('runs/class_distribution.png', dpi=150)
-    print("Class distribution plot saved to: runs/class_distribution.png")
+    plt.savefig(os.path.join(output_dir, 'class_distribution.png'), dpi=150)
+    print(f"Class distribution plot saved to: {os.path.join(output_dir, 'class_distribution.png')}")
     plt.close()
 
 if __name__ == "__main__":
