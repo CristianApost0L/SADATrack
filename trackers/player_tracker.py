@@ -66,6 +66,10 @@ class PlayerTracker:
 
         player_dict = {}
         for box in results.boxes:
+            # --- FIX: Check if track ID exists ---
+            if box.id is None:
+                continue
+                
             track_id = int(box.id.tolist()[0])
             result = box.xyxy.tolist()[0]
             object_cls_id = box.cls.tolist()[0]
@@ -93,6 +97,3 @@ class PlayerTracker:
             output_video_frames.append(frame)
         
         return output_video_frames
-
-
-    

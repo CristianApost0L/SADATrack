@@ -191,6 +191,26 @@ class MiniCourt():
             1: constants.PLAYER_1_HEIGHT_METERS,
             2: constants.PLAYER_2_HEIGHT_METERS
         }
+        
+        # --- FIX: DYNAMICALLY MAP TRACK IDs TO HEIGHTS ---
+        all_ids = set()
+        for frame in player_boxes:
+            for track_id in frame.keys():
+                all_ids.add(track_id)
+        
+        # Sort IDs to keep consistency (e.g. 3 is P1, 5 is P2)
+        sorted_ids = sorted(list(all_ids))
+        
+        # Map actual IDs found in video to the height constants
+        if len(sorted_ids) > 0:
+            player_heights[sorted_ids[0]] = constants.PLAYER_1_HEIGHT_METERS
+        if len(sorted_ids) > 1:
+            player_heights[sorted_ids[1]] = constants.PLAYER_2_HEIGHT_METERS
+            
+        # Fallback for any other IDs to prevent crashing
+        for extra_id in sorted_ids[2:]:
+            player_heights[extra_id] = constants.PLAYER_1_HEIGHT_METERS
+        # -------------------------------------------------
 
         output_player_boxes = []
         output_ball_boxes = []
@@ -199,11 +219,14 @@ class MiniCourt():
             ball_box = ball_boxes[frame_num][1]
             ball_position = get_center_of_bbox(ball_box)
             
-            # UPDATE 1: Access bbox inside the lambda function
-            closest_player_id_to_ball = min(player_bbox.keys(), key=lambda x: measure_distance(ball_position, get_center_of_bbox(player_bbox[x]["bbox"])))
+            # Check if dict is not empty before min()
+            if len(player_bbox) > 0:
+                closest_player_id_to_ball = min(player_bbox.keys(), key=lambda x: measure_distance(ball_position, get_center_of_bbox(player_bbox[x]["bbox"])))
+            else:
+                closest_player_id_to_ball = None
 
             output_player_bboxes_dict = {}
-            # UPDATE 2: Unpack value as player_data
+            
             for player_id, player_data in player_bbox.items():
                 bbox = player_data["bbox"] # Extract bbox
                 foot_position = get_foot_position(bbox)
@@ -217,10 +240,16 @@ class MiniCourt():
                 frame_index_min = max(0, frame_num - 20)
                 frame_index_max = min(len(player_boxes), frame_num + 50)
                 
-                # UPDATE 3: Access bbox inside list comprehension
-                bboxes_heights_in_pixels = [get_height_of_bbox(player_boxes[i][player_id]["bbox"]) for i in range(frame_index_min, frame_index_max)]
+                bboxes_heights_in_pixels = []
+                for i in range(frame_index_min, frame_index_max):
+                    if player_id in player_boxes[i]:
+                        bboxes_heights_in_pixels.append(get_height_of_bbox(player_boxes[i][player_id]["bbox"]))
                 
-                max_player_height_in_pixels = max(bboxes_heights_in_pixels)
+                # Safety check if list is empty
+                if not bboxes_heights_in_pixels:
+                    max_player_height_in_pixels = 100 # Default safe value
+                else:
+                    max_player_height_in_pixels = max(bboxes_heights_in_pixels)
 
                 mini_court_player_position = self.get_mini_court_coordinates(foot_position,
                                                                              closest_key_point,
@@ -232,7 +261,6 @@ class MiniCourt():
                 output_player_bboxes_dict[player_id] = mini_court_player_position
 
                 if closest_player_id_to_ball == player_id:
-                    # Get The closest keypoint in pixels
                     closest_key_point_index = get_closest_keypoint_index(ball_position, original_court_key_points, [0, 2, 12, 13])
                     closest_key_point = (original_court_key_points[closest_key_point_index * 2],
                                          original_court_key_points[closest_key_point_index * 2 + 1])
@@ -256,4 +284,3 @@ class MiniCourt():
                 y= int(y)
                 cv2.circle(frame, (x,y), 5, color, -1)
         return frames
-

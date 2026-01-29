@@ -19,17 +19,25 @@ class PoseExtractor:
         frames_data = []
         
         for frame_info in sequence_data:
-            # Ensure input is numpy array
-            kpts_raw = np.array(frame_info['keypoints'])
-            bbox = frame_info['bbox']
+            # SAFETY: Handle cases where keypoints are None or empty
+            raw_kpts = frame_info.get('keypoints', [])
+            bbox = frame_info.get('bbox', [0, 0, 1, 1])
             
-            # Calculate box height and center for normalization logic
-            x1, y1, x2, y2 = bbox
-            box_h = y2 - y1
-            box_center = np.array([(x1 + x2) / 2.0, (y1 + y2) / 2.0])
+            # Convert to numpy
+            kpts_np = np.array(raw_kpts)
             
-            # Normalize the keypoints for this frame
-            frame_kpts = self._normalize(kpts_raw, box_h, box_center)
+            # --- CRITICAL FIX ---
+            # If the array is empty, 1D, or doesn't have 17 joints, use dummy data
+            if kpts_np.size == 0 or kpts_np.ndim < 2 or kpts_np.shape[0] != 17:
+                # Create a dummy zero-filled frame (17 joints, 3 values: x,y,conf)
+                frame_kpts = np.zeros((17, 3), dtype=np.float32)
+            else:
+                # Valid data: Proceed with normalization
+                x1, y1, x2, y2 = bbox
+                box_h = y2 - y1
+                box_center = np.array([(x1 + x2) / 2.0, (y1 + y2) / 2.0])
+                frame_kpts = self._normalize(kpts_np, box_h, box_center)
+            
             frames_data.append(frame_kpts)
         
         return self._post_process(frames_data)
