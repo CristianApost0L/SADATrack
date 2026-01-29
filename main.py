@@ -11,11 +11,27 @@ from mini_court import MiniCourt
 import cv2
 import pandas as pd
 from copy import deepcopy
+from action_recognition.model import HDGCN_Tennis
+from action_recognition.extractor import PoseExtractor
+import torch
 
+# The official 12 classes from the dataset
+THETIS_CLASSES = [
+    "backhand2hands", "backhand", "backhand_slice", "backhand_volley",
+    "forehand_flat", "forehand_openstands", "forehand_slice", "forehand_volley",
+    "flat_service", "kick_service", "slice_service", "smash"
+]
 
 def main():
     # Read Video
     input_video_path = "input_videos/input_video.mp4"
+    
+    # Initialize Action Classifier
+    extractor = PoseExtractor()
+
+    action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
+    action_model.load_state_dict(torch.load('models/best_stgcn_yolo26x.pth'))
+    action_model.eval()
     video_frames = read_video(input_video_path)
 
     # Detect Players and Ball
@@ -87,6 +103,48 @@ def main():
         player_positions = player_mini_court_detections[start_frame]
         player_shot_ball = min( player_positions.keys(), key=lambda player_id: measure_distance(player_positions[player_id],
                                                                                                  ball_mini_court_detections[start_frame][1]))
+
+        # 1. Define the Window
+        # The GCN needs a sequence (e.g., 40 frames). Center it on the shot frame.
+        window_size = 40 
+        half_window = window_size // 2
+        start_window = max(0, start_frame - half_window)
+        end_window = min(len(video_frames), start_frame + half_window)
+
+        # 2. Extract Keypoints Sequence (CORRECTED)
+        sequence_data = []
+        for f in range(start_window, end_window):
+            # Check if frame exists and player is detected
+            if f < len(player_detections) and player_shot_ball in player_detections[f]:
+                # We need BOTH bbox and keypoints for normalization
+                data_point = {
+                    'bbox': player_detections[f][player_shot_ball]['bbox'],
+                    'keypoints': player_detections[f][player_shot_ball]['keypoints']
+                }
+                sequence_data.append(data_point)
+            else:
+                # Handle missing frames (pad with dummy data)
+                # We use a dummy bbox [0,0,1,1] to avoid division by zero errors
+                sequence_data.append({'bbox': [0,0,1,1], 'keypoints': [[0,0,0]] * 17})
+
+        # 3. Normalize using the class instance
+        # You need to initialize 'extractor = PoseExtractor()' before the loop (see Fix #4)
+        normalized_input = extractor.process_sequence(sequence_data)
+        
+        # Convert to tensor (N, C, T, V)
+        inp_tensor = torch.from_numpy(normalized_input).unsqueeze(0).float()
+        inp_tensor = inp_tensor.permute(0, 3, 1, 2) # (1, 3, 40, 17)
+
+        # 4. Predict
+        with torch.no_grad():
+            output = action_model(inp_tensor)
+            prediction_idx = torch.argmax(output, dim=1).item()
+            shot_name = THETIS_CLASSES[prediction_idx]
+
+        # 5. Save to Stats
+        current_player_stats = deepcopy(player_stats_data[-1])
+        current_player_stats['frame_num'] = start_frame
+        current_player_stats['shot_type'] = shot_name
 
         # opponent player speed
         opponent_player_id = 1 if player_shot_ball == 2 else 2

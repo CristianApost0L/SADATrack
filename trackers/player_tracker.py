@@ -14,13 +14,16 @@ class PlayerTracker:
         chosen_player = self.choose_players(court_keypoints, player_detections_first_frame)
         filtered_player_detections = []
         for player_dict in player_detections:
-            filtered_player_dict = {track_id: bbox for track_id, bbox in player_dict.items() if track_id in chosen_player}
+            # Preserve the whole data object (bbox + keypoints) for chosen players
+            filtered_player_dict = {track_id: player_data for track_id, player_data in player_dict.items() if track_id in chosen_player}
             filtered_player_detections.append(filtered_player_dict)
         return filtered_player_detections
 
     def choose_players(self, court_keypoints, player_dict):
         distances = []
-        for track_id, bbox in player_dict.items():
+        for track_id, player_data in player_dict.items():
+            # Extract bbox from the new dictionary structure
+            bbox = player_data["bbox"]
             player_center = get_center_of_bbox(bbox)
 
             min_distance = float('inf')
@@ -31,7 +34,7 @@ class PlayerTracker:
                     min_distance = distance
             distances.append((track_id, min_distance))
         
-        # sorrt the distances in ascending order
+        # sort the distances in ascending order
         distances.sort(key = lambda x: x[1])
         # Choose the first 2 tracks
         chosen_players = [distances[0][0], distances[1][0]]
@@ -56,7 +59,8 @@ class PlayerTracker:
         
         return player_detections
 
-    def detect_frame(self,frame):
+    def detect_frame(self, frame):
+        # Change persist=True to track
         results = self.model.track(frame, persist=True)[0]
         id_name_dict = results.names
 
@@ -66,16 +70,23 @@ class PlayerTracker:
             result = box.xyxy.tolist()[0]
             object_cls_id = box.cls.tolist()[0]
             object_cls_name = id_name_dict[object_cls_id]
+            
             if object_cls_name == "person":
-                player_dict[track_id] = result
+                # Save BOTH bounding box AND keypoints
+                # Check if keypoints exist (YOLO pose returns them in results.keypoints)
+                keypoints = results.keypoints.data[list(results.boxes.id).index(track_id)].tolist() if results.keypoints is not None else []
+                player_dict[track_id] = {"bbox": result, "keypoints": keypoints}
         
         return player_dict
 
-    def draw_bboxes(self,video_frames, player_detections):
+    def draw_bboxes(self, video_frames, player_detections):
         output_video_frames = []
         for frame, player_dict in zip(video_frames, player_detections):
             # Draw Bounding Boxes
-            for track_id, bbox in player_dict.items():
+            for track_id, player_data in player_dict.items():
+                # Extract bbox from the new dictionary structure
+                bbox = player_data["bbox"] 
+                
                 x1, y1, x2, y2 = bbox
                 cv2.putText(frame, f"Player ID: {track_id}",(int(bbox[0]),int(bbox[1] -10 )),cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
                 cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
