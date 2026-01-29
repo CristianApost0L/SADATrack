@@ -504,19 +504,19 @@ class CurriculumLearningScheduler:
         self.stages = {
             'weak': {
                 'flip_prob': 0.3,
-                'rotation_range': 5,
+                'rotation_range': 10,
                 'scale_range': 0.05,
                 'noise_std': 0.003,
             },
             'medium': {
                 'flip_prob': 0.5,
-                'rotation_range': 10,
+                'rotation_range': 20,
                 'scale_range': 0.1,
                 'noise_std': 0.005,
             },
             'strong': {
                 'flip_prob': 0.7,
-                'rotation_range': 20,
+                'rotation_range': 35,
                 'scale_range': 0.2,
                 'noise_std': 0.01,
             }
@@ -657,21 +657,21 @@ class TennisDataset(Dataset):
         if strength == 'weak':
             self.aug_probs.update({
                 'flip_prob': 0.3,
-                'rotation_range': 5,
+                'rotation_range': 10,
                 'scale_range': 0.05,
                 'noise_std': 0.003,
             })
         elif strength == 'medium':
             self.aug_probs.update({
                 'flip_prob': 0.5,
-                'rotation_range': 10,
+                'rotation_range': 20,
                 'scale_range': 0.1,
                 'noise_std': 0.005,
             })
         elif strength == 'strong':
             self.aug_probs.update({
                 'flip_prob': 0.7,
-                'rotation_range': 20,
+                'rotation_range': 35,
                 'scale_range': 0.2,
                 'noise_std': 0.01,
             })

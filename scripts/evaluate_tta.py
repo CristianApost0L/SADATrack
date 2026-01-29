@@ -2,6 +2,7 @@ import os
 import sys
 import yaml
 import argparse
+import random
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -105,6 +106,15 @@ def main(config_path):
     RANDOM_SEED = config['training']['random_seed']
     
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # ============ SET RANDOM SEEDS ============
+    random.seed(RANDOM_SEED)
+    np.random.seed(RANDOM_SEED)
+    torch.manual_seed(RANDOM_SEED)
+    torch.cuda.manual_seed(RANDOM_SEED)
+    torch.cuda.manual_seed_all(RANDOM_SEED)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     
     os.makedirs(EVALUATION_DIR, exist_ok=True)
     
