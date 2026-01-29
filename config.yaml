@@ -28,6 +28,13 @@ training:
   checkpoint_frequency: 5       # Save checkpoint every N epochs
   monitor_metric: 'f1'          # Metric to monitor: 'f1' or 'loss'
   
+  # Curriculum Learning
+  use_curriculum_learning: true  # Enable/disable curriculum learning for augmentation
+  curriculum_schedule: 'linear'  # 'linear', 'exponential', or 'step'
+                                  # - linear: gradual transition weak -> medium -> strong
+                                  # - exponential: slow start, fast end
+                                  # - step: abrupt transitions (0-33% weak, 33-66% medium, 66-100% strong)
+  
 # Model hyperparameters
 model_hyperparameters:
   dropout: 0.5
