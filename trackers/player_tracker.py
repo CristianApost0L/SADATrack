@@ -41,7 +41,7 @@ class PlayerTracker:
         return chosen_players
 
 
-    def detect_frames(self,frames, read_from_stub=False, stub_path=None):
+    def detect_frames(self,frames, read_from_stub=False, stub_path=None, yolo_verbosity):
         player_detections = []
 
         if read_from_stub and stub_path is not None:
@@ -50,7 +50,7 @@ class PlayerTracker:
             return player_detections
 
         for frame in frames:
-            player_dict = self.detect_frame(frame)
+            player_dict = self.detect_frame(frame, yolo_verbosity)
             player_detections.append(player_dict)
         
         if stub_path is not None:
@@ -59,9 +59,9 @@ class PlayerTracker:
         
         return player_detections
 
-    def detect_frame(self, frame):
+    def detect_frame(self, frame, yolo_verbosity):
         # Change persist=True to track
-        results = self.model.track(frame, persist=True)[0]
+        results = self.model.track(frame, persist=True, verbose = yolo_verbosity)[0]
         id_name_dict = results.names
 
         player_dict = {}

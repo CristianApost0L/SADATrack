@@ -53,7 +53,7 @@ class BallTracker:
 
         return frame_nums_with_ball_hits
 
-    def detect_frames(self,frames, read_from_stub=False, stub_path=None):
+    def detect_frames(self,frames, read_from_stub=False, stub_path=None, yolo_verbosity):
         ball_detections = []
 
         if read_from_stub and stub_path is not None:
@@ -62,7 +62,7 @@ class BallTracker:
             return ball_detections
 
         for frame in frames:
-            player_dict = self.detect_frame(frame)
+            player_dict = self.detect_frame(frame, yolo_verbosity)
             ball_detections.append(player_dict)
         
         if stub_path is not None:
@@ -71,8 +71,8 @@ class BallTracker:
         
         return ball_detections
 
-    def detect_frame(self,frame):
-        results = self.model.predict(frame,conf=0.15)[0]
+    def detect_frame(self,frame, yolo_verbosity):
+        results = self.model.predict(frame,conf=0.15, verbose = yolo_verbosity)[0]
 
         ball_dict = {}
         for box in results.boxes:
