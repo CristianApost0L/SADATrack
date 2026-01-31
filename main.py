@@ -64,7 +64,7 @@ def draw_skeletons(video_frames, player_detections):
     
     return output_frames
 
-def main(input_video):
+def main(input_video, HDGCN_window_size):
     # Read Video
     input_video_path = input_video
 
@@ -237,7 +237,7 @@ def main(input_video):
 
         # 1. Define the Window
         # The GCN needs a sequence (e.g., 40 frames). Center it on the shot frame.
-        window_size = constants.HDGCN_WINDOW_SIZE
+        window_size = HDGCN_window_size
         half_window = window_size // 2
         start_window = max(0, start_frame - half_window)
         end_window = min(len(video_frames), start_frame + half_window)
@@ -352,13 +352,15 @@ def main(input_video):
 
 if __name__ == "__main__":
     # Initialize the parser
-    parser = argparse.ArgumentParser(description="Process a video file from a specific path.")
+    parser = argparse.ArgumentParser(description="Process a video file from a specific path using a specific window size.")
     
     # Add the path argument
     parser.add_argument("--path", type=str, default = "input_videos/input_video.mp4", help="The full path to the video file", required=True)
+
+    parser.add_argument("--window-size", type=int, default = "40", help="The HDGCN shot recognition window size", required=True)
 
     # Parse the arguments
     args = parser.parse_args()
 
     # Call main
-    main(args.path)
+    main(args.path, args.window_size)

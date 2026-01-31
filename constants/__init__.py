@@ -13,8 +13,6 @@ THETIS_CLASSES = [
     "flat_service", "kick_service", "slice_service", "smash"
 ]
 
-HDGCN_WINDOW_SIZE = 40 # Window size for HDGCN shot recognition
-
 TARGET_FPS = 24 # Target FPS for videos
 
 COURT_INFER_INTERVAL = 12 # Refresh court keypoints every half second (24 FPS videos)
