@@ -103,7 +103,8 @@ def main(input_video):
     court_line_detector = CourtLineDetector(court_model_path)
 
     # Continuous Court Detection
-    court_infer_interval = 30 # Run detection every 30 frames
+    court_infer_interval = constants.COURT_INFER_INTERVAL
+
     print(f"Detecting court lines every {court_infer_interval} frames...")
     
     court_keypoints = []
