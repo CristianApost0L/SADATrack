@@ -1,11 +1,12 @@
 import cv2
+import constants
 
 def read_video(video_path):
     cap = cv2.VideoCapture(video_path)
     
     # Get original FPS and set Target FPS
     original_fps = cap.get(cv2.CAP_PROP_FPS)
-    target_fps = 24
+    target_fps = constants.TARGET_FPS
     
     # Calculate the ratio (Source / Target)
     # e.g. 60 / 24 = 2.5 (Skip frames)

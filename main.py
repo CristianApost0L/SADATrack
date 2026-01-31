@@ -64,13 +64,6 @@ def draw_skeletons(video_frames, player_detections):
     
     return output_frames
 
-# The official 12 classes from the dataset
-THETIS_CLASSES = [
-    "backhand2hands", "backhand", "backhand_slice", "backhand_volley",
-    "forehand_flat", "forehand_openstands", "forehand_slice", "forehand_volley",
-    "flat_service", "kick_service", "slice_service", "smash"
-]
-
 def main(input_video):
     # Read Video
     input_video_path = input_video
@@ -244,7 +237,7 @@ def main(input_video):
 
         # 1. Define the Window
         # The GCN needs a sequence (e.g., 40 frames). Center it on the shot frame.
-        window_size = 40 
+        window_size = constants.HDGCN_WINDOW_SIZE
         half_window = window_size // 2
         start_window = max(0, start_frame - half_window)
         end_window = min(len(video_frames), start_frame + half_window)
@@ -277,7 +270,7 @@ def main(input_video):
         with torch.no_grad():
             output = action_model(inp_tensor)
             prediction_idx = torch.argmax(output, dim=1).item()
-            shot_name = THETIS_CLASSES[prediction_idx]
+            shot_name = constants.THETIS_CLASSES[prediction_idx]
             
         # --- DEBUG: CHECK IF INPUT IS EMPTY ---
         non_zero_frames = np.count_nonzero(normalized_input)
