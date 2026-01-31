@@ -219,6 +219,9 @@ class MiniCourt():
             ball_box = ball_boxes[frame_num][1]
             ball_position = get_center_of_bbox(ball_box)
             
+            # Get the court keypoints for this specific frame
+            current_court_keypoints = original_court_key_points[frame_num]
+
             # Check if dict is not empty before min()
             if len(player_bbox) > 0:
                 closest_player_id_to_ball = min(player_bbox.keys(), key=lambda x: measure_distance(ball_position, get_center_of_bbox(player_bbox[x]["bbox"])))
@@ -232,10 +235,10 @@ class MiniCourt():
                 foot_position = get_foot_position(bbox)
 
                 # Get The closest keypoint in pixels
-                closest_key_point_index = get_closest_keypoint_index(foot_position, original_court_key_points, [0, 2, 12, 13])
-                closest_key_point = (original_court_key_points[closest_key_point_index * 2],
-                                     original_court_key_points[closest_key_point_index * 2 + 1])
-
+                closest_key_point_index = get_closest_keypoint_index(foot_position, current_court_keypoints, [0, 2, 12, 13])
+                closest_key_point = (current_court_keypoints[closest_key_point_index * 2],
+                                     current_court_keypoints[closest_key_point_index * 2 + 1])
+                
                 # Get Player height in pixels
                 frame_index_min = max(0, frame_num - 20)
                 frame_index_max = min(len(player_boxes), frame_num + 50)
@@ -261,9 +264,10 @@ class MiniCourt():
                 output_player_bboxes_dict[player_id] = mini_court_player_position
 
                 if closest_player_id_to_ball == player_id:
-                    closest_key_point_index = get_closest_keypoint_index(ball_position, original_court_key_points, [0, 2, 12, 13])
-                    closest_key_point = (original_court_key_points[closest_key_point_index * 2],
-                                         original_court_key_points[closest_key_point_index * 2 + 1])
+                    # UPDATED: Use current_court_keypoints
+                    closest_key_point_index = get_closest_keypoint_index(ball_position, current_court_keypoints, [0, 2, 12, 13])
+                    closest_key_point = (current_court_keypoints[closest_key_point_index * 2],
+                                         current_court_keypoints[closest_key_point_index * 2 + 1])
 
                     mini_court_player_position = self.get_mini_court_coordinates(ball_position,
                                                                                  closest_key_point,

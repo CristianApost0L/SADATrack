@@ -101,10 +101,27 @@ def main(input_video):
     # Court Line Detector model
     court_model_path = "/kaggle/input/cv-project/keypoints_model.pth"
     court_line_detector = CourtLineDetector(court_model_path)
-    court_keypoints = court_line_detector.predict(video_frames[0])
+
+    # Continuous Court Detection
+    court_infer_interval = 30 # Run detection every 30 frames
+    print(f"Detecting court lines every {court_infer_interval} frames...")
+    
+    court_keypoints = []
+    last_keypoints = None
+
+    for i, frame in enumerate(video_frames):
+        if i % court_infer_interval == 0:
+            last_keypoints = court_line_detector.predict(frame)
+        
+        # Safety check: if first frame fails, handle it (though unlikely)
+        if last_keypoints is None:
+            # Fallback to zeros or handle error if needed
+            last_keypoints = [0] * 28 
+            
+        court_keypoints.append(last_keypoints)
 
     # choose players
-    player_detections = player_tracker.choose_and_filter_players(court_keypoints, player_detections)
+    player_detections = player_tracker.choose_and_filter_players(court_keypoints[0], player_detections)
 
     pose_estimator = YOLO('/kaggle/input/cv-project/yolo26x-pose.pt')
 
@@ -167,13 +184,15 @@ def main(input_video):
     mini_court = MiniCourt(video_frames[0]) 
 
     # Detect ball shots
-    ball_shot_frames= ball_tracker.get_ball_shot_frames(ball_detections)
+    ball_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
 
     # Convert positions to mini court positions
-    player_mini_court_detections, ball_mini_court_detections = mini_court.convert_bounding_boxes_to_mini_court_coordinates(player_detections, 
-                                                                                                          ball_detections,
-                                                                                                          court_keypoints)
-
+    player_mini_court_detections, ball_mini_court_detections = mini_court.convert_bounding_boxes_to_mini_court_coordinates(
+                                                                            player_detections, 
+                                                                            ball_detections,
+                                                                            court_keypoints
+                                                                            )
+    
     player_stats_data = [{
         'frame_num':0,
         'player_1_number_of_shots':0,
@@ -311,11 +330,12 @@ def main(input_video):
 
     # Draw output
     ## Draw Player Bounding Boxes
-    output_video_frames= player_tracker.draw_bboxes(video_frames, player_detections)
+    output_video_frames = player_tracker.draw_bboxes(video_frames, player_detections)
     output_video_frames = draw_skeletons(output_video_frames, player_detections)
-    output_video_frames= ball_tracker.draw_bboxes(output_video_frames, ball_detections)
+    output_video_frames = ball_tracker.draw_bboxes(output_video_frames, ball_detections)
 
     ## Draw court Keypoints
+    # Pass the full list 'court_keypoints'
     output_video_frames  = court_line_detector.draw_keypoints_on_video(output_video_frames, court_keypoints)
 
     # Draw Mini Court

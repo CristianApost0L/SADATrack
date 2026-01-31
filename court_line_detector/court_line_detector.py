@@ -41,7 +41,8 @@ class CourtLineDetector:
     
     def draw_keypoints_on_video(self, video_frames, keypoints):
         output_video_frames = []
-        for frame in video_frames:
-            frame = self.draw_keypoints(frame, keypoints)
+        # UPDATED: Use zip to iterate frames and keypoints simultaneously
+        for frame, kps in zip(video_frames, keypoints):
+            frame = self.draw_keypoints(frame, kps)
             output_video_frames.append(frame)
         return output_video_frames
