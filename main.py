@@ -246,8 +246,6 @@ def main(input_video, HDGCN_window_size, yolo_verbosity):
         start_window = max(0, start_frame - half_window)
         end_window = min(len(video_frames), start_frame + half_window)
 
-        print(f'HDGCN Window size is: {HDGCN_window_size}')
-
         # 2. Extract Keypoints Sequence (CORRECTED)
         sequence_data = []
         for f in range(start_window, end_window):
