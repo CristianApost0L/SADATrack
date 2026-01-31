@@ -41,7 +41,7 @@ class PlayerTracker:
         return chosen_players
 
 
-    def detect_frames(self,frames, read_from_stub=False, stub_path=None, yolo_verbosity):
+    def detect_frames(self, frames, yolo_verbosity, read_from_stub=False, stub_path=None):
         player_detections = []
 
         if read_from_stub and stub_path is not None:
