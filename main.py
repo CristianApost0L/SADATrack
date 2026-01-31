@@ -68,6 +68,8 @@ def main(input_video, HDGCN_window_size, yolo_verbosity):
     # Read Video
     input_video_path = input_video
 
+    
+
     # Initialize Action Classifier
     extractor = PoseExtractor()
 
@@ -83,12 +85,12 @@ def main(input_video, HDGCN_window_size, yolo_verbosity):
     player_detections = player_tracker.detect_frames(video_frames,
                                                      read_from_stub=False,
                                                      stub_path="tracker_stubs/player_detections.pkl",
-                                                     yolo_verbosity
+                                                     yolo_verbosity = yolo_verbosity
                                                      )
     ball_detections = ball_tracker.detect_frames(video_frames,
                                                      read_from_stub=False,
                                                      stub_path="tracker_stubs/ball_detections.pkl",
-                                                     yolo_verbosity
+                                                     yolo_verbosity = yolo_verbosity
                                                      )
     ball_detections = ball_tracker.interpolate_ball_positions(ball_detections)
     
