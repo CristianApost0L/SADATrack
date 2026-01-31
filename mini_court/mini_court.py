@@ -187,96 +187,56 @@ class MiniCourt():
         return  mini_court_player_position
 
     def convert_bounding_boxes_to_mini_court_coordinates(self, player_boxes, ball_boxes, original_court_key_points):
-        player_heights = {
-            1: constants.PLAYER_1_HEIGHT_METERS,
-            2: constants.PLAYER_2_HEIGHT_METERS
-        }
-        
-        # --- FIX: DYNAMICALLY MAP TRACK IDs TO HEIGHTS ---
-        all_ids = set()
-        for frame in player_boxes:
-            for track_id in frame.keys():
-                all_ids.add(track_id)
-        
-        # Sort IDs to keep consistency (e.g. 3 is P1, 5 is P2)
-        sorted_ids = sorted(list(all_ids))
-        
-        # Map actual IDs found in video to the height constants
-        if len(sorted_ids) > 0:
-            player_heights[sorted_ids[0]] = constants.PLAYER_1_HEIGHT_METERS
-        if len(sorted_ids) > 1:
-            player_heights[sorted_ids[1]] = constants.PLAYER_2_HEIGHT_METERS
-            
-        # Fallback for any other IDs to prevent crashing
-        for extra_id in sorted_ids[2:]:
-            player_heights[extra_id] = constants.PLAYER_1_HEIGHT_METERS
-        # -------------------------------------------------
-
         output_player_boxes = []
         output_ball_boxes = []
 
+        # 1. Prepare the Destination Points (Mini-Court) ONCE
+        # Convert flat list [x,y,x,y...] to shape (N, 1, 2)
+        drawing_key_points = np.array(self.drawing_key_points).reshape((-1, 1, 2))
+
         for frame_num, player_bbox in enumerate(player_boxes):
+            
+            # --- 2. Calculate Homography for the Current Frame ---
+            # Get the detected court points for this specific frame
+            # Reshape to (N, 1, 2) required by cv2.findHomography
+            current_court_keypoints = np.array(original_court_key_points[frame_num]).reshape((-1, 1, 2))
+            
+            # Find the matrix that maps Video -> Mini-Court
+            # RANSAC helps ignore outliers (bad keypoint detections)
+            h_matrix, _ = cv2.findHomography(current_court_keypoints, drawing_key_points, cv2.RANSAC)
+            
+            # --- 3. Transform Players ---
+            output_player_bboxes_dict = {}
+            for player_id, player_data in player_bbox.items():
+                bbox = player_data["bbox"]
+                foot_position = get_foot_position(bbox)
+                
+                # Reshape foot point for perspectiveTransform: (1, 1, 2)
+                foot_point = np.array([[foot_position]], dtype='float32')
+                
+                if h_matrix is not None:
+                    # Apply the matrix
+                    mini_court_player_position = cv2.perspectiveTransform(foot_point, h_matrix)
+                    # Extract coordinates
+                    x, y = mini_court_player_position[0][0]
+                    output_player_bboxes_dict[player_id] = (x, y)
+            
+            output_player_boxes.append(output_player_bboxes_dict)
+
+            # --- 4. Transform Ball ---
+            # We treat the ball independently (mapped to ground plane)
+            # This ensures we always have a ball entry, keeping lists in sync
             ball_box = ball_boxes[frame_num][1]
             ball_position = get_center_of_bbox(ball_box)
             
-            # Get the court keypoints for this specific frame
-            current_court_keypoints = original_court_key_points[frame_num]
-
-            # Check if dict is not empty before min()
-            if len(player_bbox) > 0:
-                closest_player_id_to_ball = min(player_bbox.keys(), key=lambda x: measure_distance(ball_position, get_center_of_bbox(player_bbox[x]["bbox"])))
+            if h_matrix is not None:
+                ball_point = np.array([[ball_position]], dtype='float32')
+                mini_court_ball_position = cv2.perspectiveTransform(ball_point, h_matrix)
+                x_ball, y_ball = mini_court_ball_position[0][0]
+                output_ball_boxes.append({1: (x_ball, y_ball)})
             else:
-                closest_player_id_to_ball = None
-
-            output_player_bboxes_dict = {}
-            
-            for player_id, player_data in player_bbox.items():
-                bbox = player_data["bbox"] # Extract bbox
-                foot_position = get_foot_position(bbox)
-
-                # Get The closest keypoint in pixels
-                closest_key_point_index = get_closest_keypoint_index(foot_position, current_court_keypoints, [0, 2, 12, 13])
-                closest_key_point = (current_court_keypoints[closest_key_point_index * 2],
-                                     current_court_keypoints[closest_key_point_index * 2 + 1])
-                
-                # Get Player height in pixels
-                frame_index_min = max(0, frame_num - 20)
-                frame_index_max = min(len(player_boxes), frame_num + 50)
-                
-                bboxes_heights_in_pixels = []
-                for i in range(frame_index_min, frame_index_max):
-                    if player_id in player_boxes[i]:
-                        bboxes_heights_in_pixels.append(get_height_of_bbox(player_boxes[i][player_id]["bbox"]))
-                
-                # Safety check if list is empty
-                if not bboxes_heights_in_pixels:
-                    max_player_height_in_pixels = 100 # Default safe value
-                else:
-                    max_player_height_in_pixels = max(bboxes_heights_in_pixels)
-
-                mini_court_player_position = self.get_mini_court_coordinates(foot_position,
-                                                                             closest_key_point,
-                                                                             closest_key_point_index,
-                                                                             max_player_height_in_pixels,
-                                                                             player_heights[player_id]
-                                                                             )
-
-                output_player_bboxes_dict[player_id] = mini_court_player_position
-
-                if closest_player_id_to_ball == player_id:
-                    # UPDATED: Use current_court_keypoints
-                    closest_key_point_index = get_closest_keypoint_index(ball_position, current_court_keypoints, [0, 2, 12, 13])
-                    closest_key_point = (current_court_keypoints[closest_key_point_index * 2],
-                                         current_court_keypoints[closest_key_point_index * 2 + 1])
-
-                    mini_court_player_position = self.get_mini_court_coordinates(ball_position,
-                                                                                 closest_key_point,
-                                                                                 closest_key_point_index,
-                                                                                 max_player_height_in_pixels,
-                                                                                 player_heights[player_id]
-                                                                                 )
-                    output_ball_boxes.append({1: mini_court_player_position})
-            output_player_boxes.append(output_player_bboxes_dict)
+                # Fallback if homography fails (rare)
+                output_ball_boxes.append({1: (0, 0)})
 
         return output_player_boxes, output_ball_boxes
     
