@@ -303,7 +303,30 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     output_video_frames = mini_court.draw_points_on_mini_court(output_video_frames,ball_mini_court_detections, color=(0,255,255))    
 
     # Draw Player Stats
-    output_video_frames = draw_player_stats(output_video_frames,player_stats_data_df)
+    #output_video_frames = draw_player_stats(output_video_frames,player_stats_data_df)
+
+    # Draw Shot Type below Mini Court ---
+    print("Drawing shot type labels...")
+    for i, frame in enumerate(output_video_frames):
+        # 1. Get the Shot Type for this frame
+        current_stats = player_stats_data_df.iloc[i]
+        shot_type = current_stats['shot_type']
+        
+        # Only draw if a shot type exists (not NaN/None)
+        if shot_type is not None and str(shot_type) != 'nan':
+            text = f"Shot: {shot_type}"
+            
+            # 2. Calculate Position relative to MiniCourt
+            # MiniCourt is drawn at self.start_x, self.start_y (top-left) to self.end_x, self.end_y (bottom-right)
+            # We want it below the bottom edge (end_y)
+            text_x = mini_court.start_x + 10 # Slight padding from left
+            text_y = mini_court.end_y + 30   # 30px below the minimap
+            
+            # 3. Draw Text
+            cv2.putText(frame, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 
+                        1, (0, 0, 0), 3) # Black Border (Thickness 3)
+            cv2.putText(frame, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 
+                        1, (255, 255, 255), 2) # White Text (Thickness 2)
 
     ## Draw frame number on top left corner
     for i, frame in enumerate(output_video_frames):
