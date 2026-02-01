@@ -62,7 +62,7 @@ def print_validation_report(model_predictions_log, gold_standard_data, frame_tol
             if shot_status == "EXACT" and player_ok:
                 icon = "✅ PERFECT"
             elif shot_status == "PARTIAL" and player_ok:
-                icon = "⚠️ GOOD SIDE"
+                icon = "⚠️ PARTIAL"
             elif shot_status == "WRONG" and player_ok:
                 icon = "❌ WRONG SHOT"
             elif not player_ok:
