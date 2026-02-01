@@ -305,28 +305,41 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     # Draw Player Stats
     #output_video_frames = draw_player_stats(output_video_frames,player_stats_data_df)
 
-    # Draw Shot Type below Mini Court ---
-    print("Drawing shot type labels...")
+    # Define Minimap dimensions (Fixed width from MiniCourt class)
+    minimap_width = mini_court.drawing_rectangle_width
+    minimap_start_x = mini_court.start_x
+    minimap_end_y = mini_court.end_y
+    
     for i, frame in enumerate(output_video_frames):
-        # 1. Get the Shot Type for this frame
         current_stats = player_stats_data_df.iloc[i]
         shot_type = current_stats['shot_type']
         
-        # Only draw if a shot type exists (not NaN/None)
         if shot_type is not None and str(shot_type) != 'nan':
             text = f"Shot: {shot_type}"
             
-            # 2. Calculate Position relative to MiniCourt
-            # MiniCourt is drawn at self.start_x, self.start_y (top-left) to self.end_x, self.end_y (bottom-right)
-            # We want it below the bottom edge (end_y)
-            text_x = mini_court.start_x + 10 # Slight padding from left
-            text_y = mini_court.end_y + 30   # 30px below the minimap
+            # 2. Initial Font Settings
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 1
+            thickness = 2
             
-            # 3. Draw Text
-            cv2.putText(frame, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 
-                        1, (0, 0, 0), 3) # Black Border (Thickness 3)
-            cv2.putText(frame, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 
-                        1, (255, 255, 255), 2) # White Text (Thickness 2)
+            # 3. Dynamic Scaling Loop
+            # Check size and shrink if larger than minimap
+            (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, thickness)
+            
+            while text_width > minimap_width and font_scale > 0.1:
+                font_scale -= 0.1
+                (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, thickness)
+            
+            # 4. Center Text horizontally relative to Minimap
+            # X = Start of Minimap + (Half Minimap - Half Text)
+            text_x = int(minimap_start_x + (minimap_width - text_width) / 2)
+            text_y = int(minimap_end_y + 30 + text_height) # 30px padding below minimap
+
+            # 5. Draw
+            # Black outline for visibility
+            cv2.putText(frame, text, (text_x, text_y), font, font_scale, (0, 0, 0), thickness + 2)
+            # White text
+            cv2.putText(frame, text, (text_x, text_y), font, font_scale, (255, 255, 255), thickness)
 
     ## Draw frame number on top left corner
     for i, frame in enumerate(output_video_frames):
