@@ -188,21 +188,32 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         'shot_type': None
     } ]
     
-    for ball_shot_ind in range(len(ball_shot_frames)-1):
+    for ball_shot_ind in range(len(ball_shot_frames)):
         start_frame = ball_shot_frames[ball_shot_ind]
-        end_frame = ball_shot_frames[ball_shot_ind+1]
-        ball_shot_time_in_seconds = (end_frame-start_frame)/24 # 24fps
+        
+        if ball_shot_ind == len(ball_shot_frames) - 1:
+            # Case: This is the LAST detected shot. 
+            # We don't have a "next hit" to calculate speed, so we set defaults.
+            speed_of_ball_shot = 0 
+            ball_shot_time_in_seconds = 1 # Dummy value to avoid division by zero
+            
+            # We assume the "end" is just a bit later to capture the swing
+            end_frame = min(len(enhanced_frames) - 1, start_frame + 20)
+            
+            # We cannot measure ball distance since we don't know where it lands
+            distance_covered_by_ball_meters = 0
+        else:
+            # Case: Normal shot (Start -> End)
+            end_frame = ball_shot_frames[ball_shot_ind+1]
+            ball_shot_time_in_seconds = (end_frame-start_frame)/24
 
-        # Get distance covered by the ball
-        distance_covered_by_ball_pixels = measure_distance(ball_mini_court_detections[start_frame][1],
-                                                           ball_mini_court_detections[end_frame][1])
-        distance_covered_by_ball_meters = convert_pixel_distance_to_meters( distance_covered_by_ball_pixels,
-                                                                           constants.DOUBLE_LINE_WIDTH,
-                                                                           mini_court.get_width_of_mini_court()
-                                                                           ) 
-
-        # Speed of the ball shot in km/h
-        speed_of_ball_shot = distance_covered_by_ball_meters/ball_shot_time_in_seconds * 3.6
+            distance_covered_by_ball_pixels = measure_distance(ball_mini_court_detections[start_frame][1],
+                                                            ball_mini_court_detections[end_frame][1])
+            distance_covered_by_ball_meters = convert_pixel_distance_to_meters( distance_covered_by_ball_pixels,
+                                                                            constants.DOUBLE_LINE_WIDTH,
+                                                                            mini_court.get_width_of_mini_court()
+                                                                            ) 
+            speed_of_ball_shot = distance_covered_by_ball_meters/ball_shot_time_in_seconds * 3.6
 
         # player who the ball
         player_positions = player_mini_court_detections[start_frame]
