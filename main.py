@@ -34,42 +34,52 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     action_model.load_state_dict(torch.load('/kaggle/input/cv-project/new_Swing_classifier.pth'))
     action_model.eval()
     
-    video_frames = read_video(input_video_path)
-    # Apply normalization to fix shadows before detection
+    # --- DUAL STREAM SETUP ---
+    # Stream A: Raw Frames (Clean, low noise) -> BEST FOR BALL DETECTION
+    raw_frames = read_video(input_video_path)
+    
+    # Stream B: Enhanced Frames (High contrast) -> BEST FOR PLAYER/COURT DETECTION
     print("Preprocessing video for lighting/shadows...")
-    video_frames = enhance_video_contrast(video_frames)
+    enhanced_frames = enhance_video_contrast(raw_frames)
 
 
-    # Detect Players and Ball
+    # Initialize Trackers
     player_tracker = PlayerTracker(model_path='/kaggle/input/cv-project/yolo26x.pt')
     ball_tracker = BallTracker(model_path='/kaggle/input/cv-project/yolo5_last.pt')
 
-    player_detections = player_tracker.detect_frames(video_frames,
+    # --- 2. DETECT PLAYERS (Use ENHANCED frames) ---
+    print("Detecting Players on Enhanced Video...")
+    player_detections = player_tracker.detect_frames(enhanced_frames,
                                                      read_from_stub=False,
                                                      stub_path="tracker_stubs/player_detections.pkl",
-                                                     yolo_verbosity = yolo_verbosity
+                                                     yolo_verbosity=yolo_verbosity
                                                      )
-    ball_detections = ball_tracker.detect_frames(video_frames,
+    
+    # --- 3. DETECT BALL (Use RAW frames) ---
+    # This ignores the noisy/grainy enhanced frames and looks at the clean original
+    print("Detecting Ball on Raw Video...")
+    ball_detections = ball_tracker.detect_frames(raw_frames,
                                                      read_from_stub=False,
                                                      stub_path="tracker_stubs/ball_detections.pkl",
-                                                     yolo_verbosity = yolo_verbosity
+                                                     yolo_verbosity=yolo_verbosity
                                                      )
+    
+    # Interpolate ball (standard step)
     ball_detections = ball_tracker.interpolate_ball_positions(ball_detections)
     
     
-    # Court Line Detector model
+    # --- 4. COURT DETECTION (Use ENHANCED frames) ---
+    # Lines are often faint, so contrast enhancement helps here too
     court_model_path = "/kaggle/input/cv-project/keypoints_model.pth"
     court_line_detector = CourtLineDetector(court_model_path)
-
-    # Continuous Court Detection
+    
     court_infer_interval = constants.COURT_INFER_INTERVAL
-
     print(f"Detecting court lines every {court_infer_interval} frames...")
     
     court_keypoints = []
     last_keypoints = None
 
-    for i, frame in enumerate(video_frames):
+    for i, frame in enumerate(enhanced_frames):
         if i % court_infer_interval == 0:
             last_keypoints = court_line_detector.predict(frame)
         
@@ -87,7 +97,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
 
     print("Running Pose Estimation on detected players...")
     for frame_idx, frame_dict in enumerate(player_detections):
-        frame_img = video_frames[frame_idx]
+        frame_img = enhanced_frames[frame_idx]
         img_h, img_w, _ = frame_img.shape
         
         for track_id, data in frame_dict.items():
@@ -95,7 +105,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
             bbox = data['bbox'] # [x1, y1, x2, y2]
             
             # Crop logic with boundary checks
-            padding = 30 # Add 30 pixels of context around the player
+            padding = constants.BOUNDING_BOX_PADDING # Add pixels of context around the player
             x1, y1, x2, y2 = map(int, bbox)
             x1 = max(0, x1 - padding)
             y1 = max(0, y1 - padding)
@@ -150,7 +160,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     for pid in sorted_ids[2:]: player_id_map[pid] = 1
 
     # MiniCourt
-    mini_court = MiniCourt(video_frames[0]) 
+    mini_court = MiniCourt(raw_frames[0]) 
 
     # Detect ball shots
     ball_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
@@ -215,7 +225,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         window_size = HDGCN_window_size
         half_window = window_size // 2
         start_window = max(0, start_frame - half_window)
-        end_window = min(len(video_frames), start_frame + half_window)
+        end_window = min(len(enhanced_frames), start_frame + half_window)
 
         # 2. Extract Keypoints Sequence (CORRECTED)
         sequence_data = []
@@ -286,7 +296,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         player_stats_data.append(current_player_stats)
 
     player_stats_data_df = pd.DataFrame(player_stats_data)
-    frames_df = pd.DataFrame({'frame_num': list(range(len(video_frames)))})
+    frames_df = pd.DataFrame({'frame_num': list(range(len(enhanced_frames)))})
     player_stats_data_df = pd.merge(frames_df, player_stats_data_df, on='frame_num', how='left')
     player_stats_data_df = player_stats_data_df.ffill()
 
@@ -299,7 +309,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
 
     # Draw output
     ## Draw Player Bounding Boxes
-    output_video_frames = player_tracker.draw_bboxes(video_frames, player_detections)
+    output_video_frames = player_tracker.draw_bboxes(raw_frames, player_detections)
     output_video_frames = draw_skeletons(output_video_frames, player_detections)
     output_video_frames = ball_tracker.draw_bboxes(output_video_frames, ball_detections)
 

@@ -6,6 +6,8 @@ NO_MANS_LAND_HEIGHT = 5.48
 
 DOUBLE_LINE_WIDTH = 10.97 # The only fixed measurement we actually need
 
+BOUNDING_BOX_PADDING = 30 # Pixels of padding around the player bounding box
+
 # The official 12 shot type classes from the dataset
 THETIS_CLASSES = [
     "backhand2hands", "backhand", "backhand_slice", "backhand_volley",
