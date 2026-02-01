@@ -254,6 +254,15 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         # 4. Predict
         with torch.no_grad():
             output = action_model(inp_tensor)
+            
+            # Ban Serve after first shot
+            if ball_shot_ind > 0:
+                # If a class name contains "service", kill its probability.
+                for idx, class_name in enumerate(constants.THETIS_CLASSES):
+                    if "service" in class_name:
+                        # Set logit to negative infinity so argmax never picks it
+                        output[0][idx] = -float('inf')
+
             prediction_idx = torch.argmax(output, dim=1).item()
             shot_name = constants.THETIS_CLASSES[prediction_idx]
             
