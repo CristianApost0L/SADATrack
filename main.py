@@ -79,7 +79,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
             
         court_keypoints.append(last_keypoints)
 
-    # choose players
+    # Choose players
     player_detections = player_tracker.choose_and_filter_players(court_keypoints[0], player_detections, player_detection_court_margin = player_detection_court_margin)
 
     pose_estimator = YOLO('/kaggle/input/cv-project/yolo26x-pose.pt')
@@ -94,9 +94,12 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
             bbox = data['bbox'] # [x1, y1, x2, y2]
             
             # Crop logic with boundary checks
+            padding = 30 # Add 30 pixels of context around the player
             x1, y1, x2, y2 = map(int, bbox)
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(img_w, x2), min(img_h, y2)
+            x1 = max(0, x1 - padding)
+            y1 = max(0, y1 - padding)
+            x2 = min(img_w, x2 + padding)
+            y2 = min(img_h, y2 + padding)
             
             # If box is invalid (zero width/height), skip
             if x2 <= x1 or y2 <= y1:
@@ -106,8 +109,9 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
             player_crop = frame_img[y1:y2, x1:x2]
             
             # Run Pose Estimation on the crop
+            # augment=True runs it with TTA to improve pose estimation performance (at the cost of computational resources)
             # verbose=False keeps the console clean
-            results = pose_estimator(player_crop, verbose=False)[0]
+            results = pose_estimator(player_crop, augment=True, verbose=False)[0]
             
             found_keypoints = False
             if results.keypoints is not None and len(results.keypoints.data) > 0:
