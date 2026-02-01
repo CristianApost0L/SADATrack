@@ -6,6 +6,8 @@ NO_MANS_LAND_HEIGHT = 5.48
 
 DOUBLE_LINE_WIDTH = 10.97 # The only fixed measurement we actually need
 
+COURT_MARGIN_FOR_PLAYER_DETECTION = 100 # Court margin in PIXELS for finding players
+
 # The official 12 shot type classes from the dataset
 THETIS_CLASSES = [
     "backhand2hands", "backhand", "backhand_slice", "backhand_volley",

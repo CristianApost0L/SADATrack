@@ -53,7 +53,7 @@ class BallTracker:
 
         return frame_nums_with_ball_hits
 
-    def detect_frames(self, frames, yolo_verbosity, read_from_stub=False, stub_path=None):
+    def detect_frames(self, frames, yolo_verbosity = False, read_from_stub=False, stub_path=None):
         ball_detections = []
 
         if read_from_stub and stub_path is not None:

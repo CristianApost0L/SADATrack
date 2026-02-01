@@ -1,7 +1,9 @@
 from ultralytics import YOLO 
 import cv2
 import pickle
+import numpy as np
 import sys
+import constants
 sys.path.append('../')
 from utils import measure_distance, get_center_of_bbox
 
@@ -20,8 +22,55 @@ class PlayerTracker:
         return filtered_player_detections
 
     def choose_players(self, court_keypoints, player_dict):
+        # --- NEW FILTERING LOGIC ---
+        # 1. Convert keypoints to a numpy array for easier calculation
+        court_kps = np.array(court_keypoints).reshape(-1, 2)
+        
+        # 2. Separate points into Top (far) and Bottom (close) clusters to define the trapezoid
+        avg_y = np.mean(court_kps[:, 1])
+        top_half = court_kps[court_kps[:, 1] < avg_y]
+        bottom_half = court_kps[court_kps[:, 1] > avg_y]
+        
+        # 3. Define the Valid ID list
+        valid_ids = []
+        
+        # Check if we have enough points to define lines (Safety check)
+        if len(top_half) > 0 and len(bottom_half) > 0:
+            # Find the corners: Top-Left, Top-Right, Bottom-Left, Bottom-Right
+            tl = top_half[np.argmin(top_half[:, 0])]
+            tr = top_half[np.argmax(top_half[:, 0])]
+            bl = bottom_half[np.argmin(bottom_half[:, 0])]
+            br = bottom_half[np.argmax(bottom_half[:, 0])]
+
+            for track_id, player_data in player_dict.items():
+                bbox = player_data["bbox"]
+                px, py = get_center_of_bbox(bbox)
+                
+                # 4. Calculate the expected Left and Right X coordinates at the player's Y position
+                # Using linear interpolation between the Top and Bottom corners
+                # Formula: x = x1 + (x2 - x1) * (y - y1) / (y2 - y1)
+                
+                # Left Limit (from Top-Left to Bottom-Left)
+                left_limit_x = tl[0] + (bl[0] - tl[0]) * (py - tl[1]) / (bl[1] - tl[1] + 1e-6)
+                
+                # Right Limit (from Top-Right to Bottom-Right)
+                right_limit_x = tr[0] + (br[0] - tr[0]) * (py - tr[1]) / (br[1] - tr[1] + 1e-6)
+                
+                # 5. Check if player is between the lines (with a generous margin for running wide)
+                margin = constants.COURT_MARGIN_FOR_PLAYER_DETECTION # pixels
+                if (left_limit_x - margin) < px < (right_limit_x + margin):
+                    valid_ids.append(track_id)
+        
+        # Fallback: If filter removes everyone (or too many), revert to checking all
+        if len(valid_ids) < 2:
+            valid_ids = list(player_dict.keys())
+        # ---------------------------
+
         distances = []
-        for track_id, player_data in player_dict.items():
+        # Update loop to iterate only over 'valid_ids'
+        for track_id in valid_ids:
+            player_data = player_dict[track_id]
+            
             # Extract bbox from the new dictionary structure
             bbox = player_data["bbox"]
             player_center = get_center_of_bbox(bbox)
@@ -41,7 +90,7 @@ class PlayerTracker:
         return chosen_players
 
 
-    def detect_frames(self, frames, yolo_verbosity, read_from_stub=False, stub_path=None):
+    def detect_frames(self, frames, yolo_verbosity = False, read_from_stub=False, stub_path=None):
         player_detections = []
 
         if read_from_stub and stub_path is not None:
