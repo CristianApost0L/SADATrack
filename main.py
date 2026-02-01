@@ -4,7 +4,8 @@ from utils import (read_video,
                    draw_player_stats,
                    convert_pixel_distance_to_meters,
                    draw_skeletons,
-                   enhance_video_contrast
+                   enhance_video_contrast,
+                   smooth_keypoints
                    )
 import constants
 from trackers import PlayerTracker,BallTracker
@@ -128,6 +129,12 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
             if not found_keypoints:
                 # If pose model fails to find a person in the crop, set empty
                 frame_dict[track_id]['keypoints'] = []
+
+    # KEYPOINT SMOOTHING 
+    # Doing it here updates 'player_detections' IN PLACE.
+    # Both the HDGCN model AND the Drawing loop will see stable skeletons.
+    print("Smoothing skeleton keypoints...")
+    player_detections = smooth_keypoints(player_detections)
 
     # --- DYNAMIC ID MAPPING ---
     # Map the actual Track IDs (e.g. 5, 23) to "Player 1" and "Player 2"
