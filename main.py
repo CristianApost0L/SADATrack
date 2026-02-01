@@ -396,7 +396,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Total processing time: {elapsed_time:.2f} seconds")
-    print(f"Processing time per frame: {elapsed_time/output_video_frames:.2f} seconds per frame")
+    print(f"Processing speed: {len(output_video_frames)/elapsed_time:.2f} FPS")
 
 
 if __name__ == "__main__":
