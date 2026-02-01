@@ -3,4 +3,4 @@ from .bbox_utils import get_center_of_bbox, measure_distance, get_foot_position,
 from .conversions import convert_pixel_distance_to_meters, convert_meters_to_pixel_distance
 from .player_stats_drawer_utils import draw_player_stats
 from .skeleton_utils import smooth_keypoints
-from .final_report.py import print_validation_report
+from .final_report import print_validation_report
