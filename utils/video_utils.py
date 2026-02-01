@@ -56,3 +56,80 @@ def save_video(output_video_frames, output_video_path):
     for frame in output_video_frames:
         out.write(frame)
     out.release()
+
+def draw_skeletons(video_frames, player_detections, ):
+    output_frames = []
+    # COCO Keypoint connections (standard skeleton structure)
+    connections = [
+        (0, 1), (0, 2), (1, 3), (2, 4), # Head
+        (5, 6), (5, 7), (7, 9), (6, 8), (8, 10), # Arms
+        (5, 11), (6, 12), (11, 12), # Torso
+        (11, 13), (13, 15), (12, 14), (14, 16) # Legs
+    ]
+    
+    for frame, player_dict in zip(video_frames, player_detections):
+        for track_id, data in player_dict.items():
+            # Get keypoints if they exist
+            if 'keypoints' not in data:
+                continue
+                
+            kpts = data['keypoints'] # List of [x, y, conf]
+            
+            # Skip if keypoints are missing or malformed
+            if len(kpts) != 17:
+                continue
+
+            # Draw Lines (Limbs)
+            for p1, p2 in connections:
+                # Check confidence (index 2) -> if < 0.5, don't draw
+                if kpts[p1][2] < 0.5 or kpts[p2][2] < 0.5:
+                    continue
+                
+                pt1 = (int(kpts[p1][0]), int(kpts[p1][1]))
+                pt2 = (int(kpts[p2][0]), int(kpts[p2][1]))
+                
+                # Draw limb in Green
+                cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
+
+            # Draw Points (Joints)
+            for i, kp in enumerate(kpts):
+                if kp[2] < 0.5: continue
+                x, y = int(kp[0]), int(kp[1])
+                # Draw joint in Red
+                cv2.circle(frame, (x, y), 4, (0, 0, 255), -1)
+                
+        output_frames.append(frame)
+    
+    return output_frames
+
+def enhance_video_contrast(frames):
+    """
+    Applies CLAHE (Contrast Limited Adaptive Histogram Equalization) 
+    to a list of video frames to handle shadows and uneven lighting.
+    """
+    enhanced_frames = []
+    
+    # Create CLAHE object
+    # clipLimit -> Threshold for contrast limiting (2.0 is standard, higher = more contrast but more noise)
+    # tileGridSize -> Size of grid for histogram equalization (8x8 is standard)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+
+    print(f"Enhancing contrast for {len(frames)} frames...")
+
+    for frame in frames:
+        # 1. Convert BGR to LAB color space
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        
+        # 2. Split into channels (L = Lightness, A/B = Colors)
+        l, a, b = cv2.split(lab)
+        
+        # 3. Apply CLAHE to the L-channel
+        l_enhanced = clahe.apply(l)
+        
+        # 4. Merge back and convert to BGR
+        lab_enhanced = cv2.merge((l_enhanced, a, b))
+        frame_enhanced = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
+        
+        enhanced_frames.append(frame_enhanced)
+        
+    return enhanced_frames

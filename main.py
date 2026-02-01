@@ -2,7 +2,9 @@ from utils import (read_video,
                    save_video,
                    measure_distance,
                    draw_player_stats,
-                   convert_pixel_distance_to_meters
+                   convert_pixel_distance_to_meters,
+                   draw_skeletons,
+                   enhance_video_contrast
                    )
 import constants
 from trackers import PlayerTracker,BallTracker
@@ -19,56 +21,10 @@ import os
 import argparse
 from ultralytics import YOLO 
 
-def draw_skeletons(video_frames, player_detections, ):
-    output_frames = []
-    # COCO Keypoint connections (standard skeleton structure)
-    connections = [
-        (0, 1), (0, 2), (1, 3), (2, 4), # Head
-        (5, 6), (5, 7), (7, 9), (6, 8), (8, 10), # Arms
-        (5, 11), (6, 12), (11, 12), # Torso
-        (11, 13), (13, 15), (12, 14), (14, 16) # Legs
-    ]
-    
-    for frame, player_dict in zip(video_frames, player_detections):
-        for track_id, data in player_dict.items():
-            # Get keypoints if they exist
-            if 'keypoints' not in data:
-                continue
-                
-            kpts = data['keypoints'] # List of [x, y, conf]
-            
-            # Skip if keypoints are missing or malformed
-            if len(kpts) != 17:
-                continue
-
-            # Draw Lines (Limbs)
-            for p1, p2 in connections:
-                # Check confidence (index 2) -> if < 0.5, don't draw
-                if kpts[p1][2] < 0.5 or kpts[p2][2] < 0.5:
-                    continue
-                
-                pt1 = (int(kpts[p1][0]), int(kpts[p1][1]))
-                pt2 = (int(kpts[p2][0]), int(kpts[p2][1]))
-                
-                # Draw limb in Green
-                cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
-
-            # Draw Points (Joints)
-            for i, kp in enumerate(kpts):
-                if kp[2] < 0.5: continue
-                x, y = int(kp[0]), int(kp[1])
-                # Draw joint in Red
-                cv2.circle(frame, (x, y), 4, (0, 0, 255), -1)
-                
-        output_frames.append(frame)
-    
-    return output_frames
 
 def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_margin):
     # Read Video
     input_video_path = input_video
-
-    
 
     # Initialize Action Classifier
     extractor = PoseExtractor()
@@ -76,7 +32,12 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
     action_model.load_state_dict(torch.load('/kaggle/input/cv-project/new_Swing_classifier.pth'))
     action_model.eval()
+    
     video_frames = read_video(input_video_path)
+    # Apply normalization to fix shadows before detection
+    print("Preprocessing video for lighting/shadows...")
+    video_frames = enhance_video_contrast(video_frames)
+
 
     # Detect Players and Ball
     player_tracker = PlayerTracker(model_path='/kaggle/input/cv-project/yolo26x.pt')
