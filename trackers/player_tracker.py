@@ -5,7 +5,7 @@ import numpy as np
 import sys
 import constants
 sys.path.append('../')
-from utils import measure_distance, get_center_of_bbox
+from utils import measure_distance, get_center_of_bbox, get_foot_position
 
 class PlayerTracker:
     def __init__(self,model_path):
