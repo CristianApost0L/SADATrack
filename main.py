@@ -20,10 +20,13 @@ from action_recognition.extractor import PoseExtractor
 import torch
 import os
 import argparse
+import time
 from ultralytics import YOLO 
 
 
 def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_margin):
+    start_time = time.time()
+
     # Read Video
     input_video_path = input_video
 
@@ -390,6 +393,11 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         os.makedirs("output_videos")
 
     save_video(output_video_frames, "output_videos/output_video.avi")
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Total processing time: {elapsed_time:.2f} seconds")
+    print(f"Processing time per frame: {elapsed_time/output_video_frames:.2f} seconds per frame")
+
 
 if __name__ == "__main__":
     # Initialize the parser
