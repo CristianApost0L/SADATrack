@@ -5,7 +5,8 @@ from utils import (read_video,
                    convert_pixel_distance_to_meters,
                    draw_skeletons,
                    enhance_video_contrast,
-                   smooth_keypoints
+                   smooth_keypoints,
+                   print_validation_report
                    )
 import constants
 from trackers import PlayerTracker,BallTracker
@@ -21,11 +22,25 @@ import torch
 import os
 import argparse
 import time
+import json
 from ultralytics import YOLO 
 
 
 def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_margin):
     start_time = time.time()
+
+    # LOAD GROUND TRUTH FROM JSON
+    ground_truth_path = input_video.rsplit(".", 1)[0] + ".json"
+
+    gold_standard_data = []
+    if ground_truth_path and os.path.exists(ground_truth_path):
+        print(f"Loading Ground Truth labels from: {ground_truth_path}")
+        with open(ground_truth_path, 'r') as f:
+            gold_standard_data = json.load(f)
+    elif ground_truth_path:
+        print(f"Warning: Ground Truth file not found at {ground_truth_path}")
+
+    model_predictions_log = []
 
     # Read Video
     input_video_path = input_video
@@ -279,14 +294,16 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
 
             prediction_idx = torch.argmax(output, dim=1).item()
             shot_name = constants.THETIS_CLASSES[prediction_idx]
-            
-        # --- DEBUG: CHECK IF INPUT IS EMPTY ---
-        non_zero_frames = np.count_nonzero(normalized_input)
-        print(f"Frame {start_frame}: Input Non-Zeros: {non_zero_frames} | Prediction: {shot_name} | Player: {player_shot_ball}")
-        # --------------------------------------
+
+        # SAVE TO LOG
+        model_predictions_log.append({
+            "frame": start_frame,
+            "shot": shot_name,
+            "player": mapped_shooter_id
+        })
 
         current_player_stats['shot_type'] = shot_name
-        print(f"Frame {start_frame}: Input Non-Zeros: {non_zero_frames} | Prediction: {shot_name} | Player: {player_shot_ball} (Mapped: {mapped_shooter_id})")
+        print(f"Frame {start_frame}: | Prediction: {shot_name} | Player: {player_shot_ball} (Mapped: {mapped_shooter_id})")
         
         # D. Opponent Speed (CRITICAL FIX FOR KEYERROR 2)
         # We find valid opponents present in the CURRENT frame
@@ -393,11 +410,15 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         os.makedirs("output_videos")
 
     save_video(output_video_frames, "output_videos/output_video.avi")
+    
+    # TIMER
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Total processing time: {elapsed_time:.2f} seconds")
     print(f"Processing speed: {len(output_video_frames)/elapsed_time:.2f} FPS")
 
+    # FINAL VALIDATION REPORT
+    print_validation_report(model_predictions_log, gold_standard_data)
 
 if __name__ == "__main__":
     # Initialize the parser
