@@ -108,8 +108,7 @@ class PlayerTracker:
 
     def detect_frame(self, frame, yolo_verbosity = False):
         # persist = True to track
-        # augment = True to use TTA
-        results = self.model.track(frame, persist=True, augment = True, verbose = yolo_verbosity)[0]
+        results = self.model.track(frame, persist=True, verbose = yolo_verbosity)[0]
         id_name_dict = results.names
 
         player_dict = {}

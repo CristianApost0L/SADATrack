@@ -109,9 +109,8 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
             player_crop = frame_img[y1:y2, x1:x2]
             
             # Run Pose Estimation on the crop
-            # augment=True runs it with TTA to improve pose estimation performance (at the cost of computational resources)
             # verbose=False keeps the console clean
-            results = pose_estimator(player_crop, augment=True, verbose=False)[0]
+            results = pose_estimator(player_crop, verbose=False)[0]
             
             found_keypoints = False
             if results.keypoints is not None and len(results.keypoints.data) > 0:
