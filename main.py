@@ -19,7 +19,7 @@ import os
 import argparse
 from ultralytics import YOLO 
 
-def draw_skeletons(video_frames, player_detections):
+def draw_skeletons(video_frames, player_detections, ):
     output_frames = []
     # COCO Keypoint connections (standard skeleton structure)
     connections = [
@@ -64,7 +64,7 @@ def draw_skeletons(video_frames, player_detections):
     
     return output_frames
 
-def main(input_video, HDGCN_window_size, yolo_verbosity):
+def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_margin):
     # Read Video
     input_video_path = input_video
 
@@ -119,7 +119,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity):
         court_keypoints.append(last_keypoints)
 
     # choose players
-    player_detections = player_tracker.choose_and_filter_players(court_keypoints[0], player_detections)
+    player_detections = player_tracker.choose_and_filter_players(court_keypoints[0], player_detections, player_detection_court_margin = player_detection_court_margin)
 
     pose_estimator = YOLO('/kaggle/input/cv-project/yolo26x-pose.pt')
 
@@ -361,13 +361,14 @@ if __name__ == "__main__":
     # Add the path argument
     parser.add_argument("--path", type=str, default = "input_videos/input_video.mp4", help="The full path to the video file", required=True)
 
-    parser.add_argument("--window-size", type=int, default = "40", help="The HDGCN shot recognition window size", required=True)
+    parser.add_argument("--window-size", type=int, default = 40, help="The HDGCN shot recognition window size", required=True)
 
     parser.add_argument("--yolo-verbosity", type=bool, default = False, help="YOLO log verbosity", required=True)
 
+    parser.add_argument("--player-detection-court-margin", type=int, default = 300, help="Court margin for detecting players and excluding line judges (in pixels)", required=True)
 
     # Parse the arguments
     args = parser.parse_args()
 
     # Call main
-    main(args.path, args.window_size, args.yolo_verbosity)
+    main(args.path, args.window_size, args.yolo_verbosity, args.player_detection_court_margin)

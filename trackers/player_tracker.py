@@ -11,9 +11,9 @@ class PlayerTracker:
     def __init__(self,model_path):
         self.model = YOLO(model_path)
 
-    def choose_and_filter_players(self, court_keypoints, player_detections):
+    def choose_and_filter_players(self, court_keypoints, player_detections, player_detection_court_margin):
         player_detections_first_frame = player_detections[0]
-        chosen_player = self.choose_players(court_keypoints, player_detections_first_frame)
+        chosen_player = self.choose_players(court_keypoints, player_detections_first_frame, player_detection_court_margin)
         filtered_player_detections = []
         for player_dict in player_detections:
             # Preserve the whole data object (bbox + keypoints) for chosen players
@@ -21,7 +21,7 @@ class PlayerTracker:
             filtered_player_detections.append(filtered_player_dict)
         return filtered_player_detections
 
-    def choose_players(self, court_keypoints, player_dict):
+    def choose_players(self, court_keypoints, player_dict, player_detection_court_margin):
         # 1. Convert keypoints to numpy for easier calc
         court_kps = np.array(court_keypoints).reshape(-1, 2)
         
@@ -57,8 +57,7 @@ class PlayerTracker:
                 right_limit_x = tr[0] + (br[0] - tr[0]) * (py - tr[1]) / (br[1] - tr[1] + 1e-6)
                 
                 # Check if player is within the width limits
-                # REDUCED MARGIN: 60 pixels (tighter constraint)
-                margin = 60 
+                margin = player_detection_court_margin
                 
                 if (left_limit_x - margin) < px < (right_limit_x + margin):
                     valid_ids.append(track_id)
