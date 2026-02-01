@@ -22,21 +22,19 @@ class PlayerTracker:
         return filtered_player_detections
 
     def choose_players(self, court_keypoints, player_dict):
-        # --- NEW FILTERING LOGIC ---
-        # 1. Convert keypoints to a numpy array for easier calculation
+        # 1. Convert keypoints to numpy for easier calc
         court_kps = np.array(court_keypoints).reshape(-1, 2)
         
-        # 2. Separate points into Top (far) and Bottom (close) clusters to define the trapezoid
+        # 2. Separate points into Top (far) and Bottom (close) to define the trapezoid
         avg_y = np.mean(court_kps[:, 1])
         top_half = court_kps[court_kps[:, 1] < avg_y]
         bottom_half = court_kps[court_kps[:, 1] > avg_y]
         
-        # 3. Define the Valid ID list
         valid_ids = []
         
-        # Check if we have enough points to define lines (Safety check)
+        # Safety check
         if len(top_half) > 0 and len(bottom_half) > 0:
-            # Find the corners: Top-Left, Top-Right, Bottom-Left, Bottom-Right
+            # Find the 4 corners: Top-Left, Top-Right, Bottom-Left, Bottom-Right
             tl = top_half[np.argmin(top_half[:, 0])]
             tr = top_half[np.argmax(top_half[:, 0])]
             bl = bottom_half[np.argmin(bottom_half[:, 0])]
@@ -44,34 +42,38 @@ class PlayerTracker:
 
             for track_id, player_data in player_dict.items():
                 bbox = player_data["bbox"]
-                px, py = get_center_of_bbox(bbox)
                 
-                # 4. Calculate the expected Left and Right X coordinates at the player's Y position
-                # Using linear interpolation between the Top and Bottom corners
-                # Formula: x = x1 + (x2 - x1) * (y - y1) / (y2 - y1)
+                # CRITICAL FIX: Use foot position (ground plane), not center
+                # This ensures the perspective calculation matches the court lines
+                px, py = get_foot_position(bbox) 
                 
-                # Left Limit (from Top-Left to Bottom-Left)
+                # Calculate the X-limits of the court at this specific Y (depth)
+                # Linear interpolation: x = x1 + (x2 - x1) * (y - y1) / (y2 - y1)
+                
+                # Left Line Limit
                 left_limit_x = tl[0] + (bl[0] - tl[0]) * (py - tl[1]) / (bl[1] - tl[1] + 1e-6)
                 
-                # Right Limit (from Top-Right to Bottom-Right)
+                # Right Line Limit
                 right_limit_x = tr[0] + (br[0] - tr[0]) * (py - tr[1]) / (br[1] - tr[1] + 1e-6)
                 
-                # 5. Check if player is between the lines (with a generous margin for running wide)
-                margin = constants.COURT_MARGIN_FOR_PLAYER_DETECTION # pixels
+                # Check if player is within the width limits
+                # REDUCED MARGIN: 60 pixels (tighter constraint)
+                margin = 60 
+                
                 if (left_limit_x - margin) < px < (right_limit_x + margin):
                     valid_ids.append(track_id)
+                else:
+                    print(f"[DEBUG] Filtered out ID {track_id}: X={px:.1f} is outside range [{left_limit_x - margin:.1f}, {right_limit_x + margin:.1f}]")
         
-        # Fallback: If filter removes everyone (or too many), revert to checking all
+        # Fallback: If strict filtering removed everyone, revert to all
         if len(valid_ids) < 2:
+            print("[WARNING] Spatial filter removed too many players. Reverting to distance-only check.")
             valid_ids = list(player_dict.keys())
-        # ---------------------------
 
+        # Standard Distance Check (only on the valid IDs)
         distances = []
-        # Update loop to iterate only over 'valid_ids'
         for track_id in valid_ids:
             player_data = player_dict[track_id]
-            
-            # Extract bbox from the new dictionary structure
             bbox = player_data["bbox"]
             player_center = get_center_of_bbox(bbox)
 
@@ -83,12 +85,9 @@ class PlayerTracker:
                     min_distance = distance
             distances.append((track_id, min_distance))
         
-        # sort the distances in ascending order
         distances.sort(key = lambda x: x[1])
-        # Choose the first 2 tracks
         chosen_players = [distances[0][0], distances[1][0]]
         return chosen_players
-
 
     def detect_frames(self, frames, yolo_verbosity = False, read_from_stub=False, stub_path=None):
         player_detections = []
