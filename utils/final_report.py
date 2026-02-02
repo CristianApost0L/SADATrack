@@ -14,41 +14,72 @@ def print_validation_report(model_predictions_log, gold_standard_data, frame_tol
     print(f"{'FINAL ACCURACY REPORT':^60}")
     print("="*60)
     
-    # Counters
     exact_shots = 0
     partial_shots = 0
     correct_players = 0
     total_labels = len(gold_standard_data)
 
     for gt in gold_standard_data:
-        # 1. Find matching prediction within tolerance
-        match = None
+        # 1. Find ALL candidates within tolerance
+        candidates = []
         for pred in model_predictions_log:
             if abs(pred['frame'] - gt['frame']) <= frame_tolerance:
-                match = pred
-                break
-        
+                candidates.append(pred)
+
+        # 2. Select the BEST candidate based on a Score
+        match = None
+        if candidates:
+            def get_score(cand):
+                score = 0
+                
+                # A. Player Match (Highest Priority)
+                if cand['player'] == gt['player']:
+                    score += 1000
+                
+                # B. Shot Match (High Priority)
+                gt_shot = gt['shot'].lower()
+                pred_shot = cand['shot'].lower()
+                
+                if gt_shot == pred_shot:
+                    score += 500
+                else:
+                    # Partial Match Check
+                    is_forehand = "forehand" in gt_shot and "forehand" in pred_shot
+                    is_backhand = "backhand" in gt_shot and "backhand" in pred_shot
+                    is_serve    = ("serve" in gt_shot or "service" in gt_shot) and \
+                                  ("serve" in pred_shot or "service" in pred_shot)
+                    if is_forehand or is_backhand or is_serve:
+                        score += 300
+                
+                # C. Time Proximity (Tie-breaker)
+                # We subtract the distance, so closer frames have higher scores
+                dist = abs(cand['frame'] - gt['frame'])
+                score -= dist 
+                
+                return score
+
+            # Pick the candidate with the max score
+            match = max(candidates, key=get_score)
+
         print(f"Frame {gt['frame']:<4}: ", end="")
         
         if match:
-            # 2. Analyze Player ID
+            # Analyze Player ID
             player_ok = (match['player'] == gt['player'])
             if player_ok: correct_players += 1
 
-            # 3. Analyze Shot Type (Fuzzy Match Logic)
+            # Analyze Shot Type
             gt_shot = gt['shot'].lower()
             pred_shot = match['shot'].lower()
             
             shot_status = "WRONG"
             
-            # Case A: Exact Match
+            # Exact
             if gt_shot == pred_shot:
                 shot_status = "EXACT"
                 exact_shots += 1
-            
-            # Case B: Partial Match (Same "Family")
+            # Partial
             else:
-                # Define families
                 is_forehand = "forehand" in gt_shot and "forehand" in pred_shot
                 is_backhand = "backhand" in gt_shot and "backhand" in pred_shot
                 is_serve    = ("serve" in gt_shot or "service" in gt_shot) and \
@@ -58,7 +89,7 @@ def print_validation_report(model_predictions_log, gold_standard_data, frame_tol
                     shot_status = "PARTIAL"
                     partial_shots += 1
             
-            # 4. Determine Icon & Print
+            # Determine Icon
             if shot_status == "EXACT" and player_ok:
                 icon = "✅ PERFECT"
             elif shot_status == "PARTIAL" and player_ok:
@@ -74,7 +105,6 @@ def print_validation_report(model_predictions_log, gold_standard_data, frame_tol
         else:
             print(f"{'❌ MISSED':<15} | Expected: {gt['shot']} (P{gt['player']})")
 
-    # Final Stats
     print("-" * 60)
     print(f"Player ID Accuracy:     {correct_players}/{total_labels} ({correct_players/total_labels*100:.1f}%)")
     print(f"Shot Exact Matches:     {exact_shots}/{total_labels} ({exact_shots/total_labels*100:.1f}%)")
