@@ -9,7 +9,7 @@ from utils import (read_video,
                    print_validation_report
                    )
 import constants
-from trackers import PlayerTracker,BallTracker
+from trackers import PlayerTracker, BallTracker, BounceDetector 
 from court_line_detector import CourtLineDetector
 from mini_court import MiniCourt
 import cv2
@@ -63,7 +63,10 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
 
     # Initialize Trackers
     player_tracker = PlayerTracker(model_path='/kaggle/input/cv-project/yolo26x.pt')
-    ball_tracker = BallTracker(model_path='/kaggle/input/cv-project/ball_model_best.pt') #Amin model
+    
+    ball_tracker = BallTracker(model_path='/kaggle/input/cv-project/ball_model_best.pt') # Amin model
+
+    bounce_detector = BounceDetector(model_path='/kaggle/input/cv-project/ctb_regr_bounce.cbm') # Amin model
 
     # --- 2. DETECT PLAYERS (Use ENHANCED frames) ---
     print("Detecting Players on Enhanced Video...")
@@ -81,6 +84,29 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     # Interpolate ball (standard step)
     ball_detections = ball_tracker.interpolate_ball_positions(ball_detections)
     
+    # 1. Get ALL candidates (Hits + Bounces) using geometric heuristic
+    candidate_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
+    
+    # 2. Detect Bounces using the new Model
+    detected_bounces = []
+    # Pass the list of (x,y) tuples directly
+    detected_bounces = bounce_detector.predict(ball_detections) 
+    
+    # 3. Filter: Keep a candidate ONLY if it is NOT a bounce
+    ball_shot_frames = []
+    for frame in candidate_shot_frames:
+        # Check if this frame is close to any detected bounce (within margin of error, e.g., 3 frames)
+        is_bounce = False
+        for b_frame in detected_bounces:
+            if abs(frame - b_frame) <= 3: 
+                is_bounce = True
+                break
+        
+        # If it's not a bounce, it's a hit!
+        if not is_bounce:
+            ball_shot_frames.append(frame)
+
+    print(f"Refined Shots: {len(ball_shot_frames)} (Filtered out {len(candidate_shot_frames) - len(ball_shot_frames)} bounces)")
     
     # --- 4. COURT DETECTION (Use ENHANCED frames) ---
     # Lines are often faint, so contrast enhancement helps here too
