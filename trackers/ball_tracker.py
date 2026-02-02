@@ -4,6 +4,7 @@ import numpy as np
 from tqdm import tqdm
 from scipy.spatial import distance
 from tracknet.tracknet import BallTrackerNet
+import constants
 
 class BallTracker:
     def __init__(self, model_path, device='cuda'):
@@ -24,42 +25,65 @@ class BallTracker:
         ball_track = [(None, None)]*2
         prev_pred = [None, None]
         
-        # 1. Get Original Dimensions
-        original_h, original_w = frames[0].shape[:2]
+        # 1. Setup
+        BATCH_SIZE = constants.BATCH_SIZE 
         
-        # 2. Calculate Scale Factors
-        scale_x = original_w / self.width
-        scale_y = original_h / self.height
-
-        print("Running Ball Tracking...")
-        for num in tqdm(range(2, len(frames))):
-            # Resize 3 consecutive frames
-            img = cv2.resize(frames[num], (self.width, self.height))
-            img_prev = cv2.resize(frames[num-1], (self.width, self.height))
-            img_preprev = cv2.resize(frames[num-2], (self.width, self.height))
+        # We need to process frames starting from index 2
+        frame_indices = list(range(2, len(frames)))
+        
+        print("Running Ball Tracking (BATCHED)...")
+        
+        # Iterate in chunks (batches)
+        for i in tqdm(range(0, len(frame_indices), BATCH_SIZE)):
+            batch_indices = frame_indices[i : i + BATCH_SIZE]
             
-            # Stack frames: (Height, Width, 9) -> (3 frames * 3 channels)
-            imgs = np.concatenate((img, img_prev, img_preprev), axis=2)
-            
-            # Normalize (0-255 -> 0-1)
-            imgs = imgs.astype(np.float32) / 255.0
-            
-            # Transpose to PyTorch format: (Channels, Height, Width)
-            imgs = np.rollaxis(imgs, 2, 0)
-            
-            # Add Batch Dimension: (1, 9, 360, 640)
-            inp = np.expand_dims(imgs, axis=0)
-
-            # Inference
-            with torch.no_grad():
-                out = self.model(torch.from_numpy(inp).float().to(self.device))
-                output = out.argmax(dim=1).detach().cpu().numpy()
+            # --- STEP A: PREPARE BATCH ON CPU ---
+            batch_inputs = []
+            for num in batch_indices:
+                # Resize 3 consecutive frames
+                img = cv2.resize(frames[num], (self.width, self.height))
+                img_prev = cv2.resize(frames[num-1], (self.width, self.height))
+                img_preprev = cv2.resize(frames[num-2], (self.width, self.height))
                 
-            # Post-process with dynamic scales
-            x_pred, y_pred = self.postprocess(output, prev_pred, scale_x, scale_y)
+                # Stack frames: (Height, Width, 9)
+                imgs = np.concatenate((img, img_prev, img_preprev), axis=2)
+                
+                # Normalize & Transpose
+                imgs = imgs.astype(np.float32) / 255.0
+                imgs = np.rollaxis(imgs, 2, 0) # (9, H, W)
+                
+                batch_inputs.append(imgs)
             
-            prev_pred = [x_pred, y_pred]
-            ball_track.append((x_pred, y_pred))
+            # Convert list to single numpy array: (Batch_Size, 9, 360, 640)
+            inp = np.array(batch_inputs)
+            
+            # --- STEP B: INFERENCE ON GPU (PARALLEL) ---
+            with torch.no_grad():
+                inp_tensor = torch.from_numpy(inp).float().to(self.device)
+                
+                # Run model on the whole batch at once
+                out = self.model(inp_tensor)
+                
+                # Get heatmaps: (Batch_Size, 360, 640)
+                output_batch = out.argmax(dim=1).detach().cpu().numpy()
+            
+            # --- STEP C: POST-PROCESS (SEQUENTIAL) ---
+            # We must do this sequentially because 'prev_pred' updates every frame
+            for j in range(len(batch_indices)):
+                # Pass the corresponding heatmap from the batch
+                x_pred, y_pred = self.postprocess(output_batch[j], prev_pred, 
+                                                self.width / frames[0].shape[1],
+                                                self.height / frames[0].shape[0])
+                
+                original_h, original_w = frames[0].shape[:2]
+                scale_x = original_w / self.width
+                scale_y = original_h / self.height
+                
+                # Re-run postprocess with correct scales if my snippet above was generic
+                x_pred, y_pred = self.postprocess(output_batch[j], prev_pred, scale_x, scale_y)
+
+                prev_pred = [x_pred, y_pred]
+                ball_track.append((x_pred, y_pred))
             
         return ball_track
     
