@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from scipy.spatial import distance
-from models.tracknet import BallTrackerNet
+from tracknet.tracknet import BallTrackerNet
 
 class BallTracker:
     def __init__(self, model_path, device='cuda'):
