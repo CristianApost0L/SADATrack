@@ -169,50 +169,68 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
 
     pose_estimator = YOLO('/kaggle/input/cv-project/yolo26x-pose.pt')
 
-    print("Running Pose Estimation on detected players...")
+    print("Running Pose Estimation on detected players (BATCHED)...")
+    
+    # 1. Collect all crops from the entire video first
+    all_crops = []
+    crop_metadata = [] # Stores (frame_idx, track_id, crop_x1, crop_y1) to map back later
+    
     for frame_idx, frame_dict in enumerate(player_detections):
         frame_img = enhanced_frames[frame_idx]
         img_h, img_w, _ = frame_img.shape
         
         for track_id, data in frame_dict.items():
-            # Get the box detected by the Tracker
-            bbox = data['bbox'] # [x1, y1, x2, y2]
+            bbox = data['bbox']
+            padding = constants.BOUNDING_BOX_PADDING
             
-            # Crop logic with boundary checks
-            padding = constants.BOUNDING_BOX_PADDING # Add pixels of context around the player
             x1, y1, x2, y2 = map(int, bbox)
             x1 = max(0, x1 - padding)
             y1 = max(0, y1 - padding)
             x2 = min(img_w, x2 + padding)
             y2 = min(img_h, y2 + padding)
             
-            # If box is invalid (zero width/height), skip
+            # Skip invalid boxes
             if x2 <= x1 or y2 <= y1:
                 frame_dict[track_id]['keypoints'] = []
                 continue
 
+            # Crop and Store
             player_crop = frame_img[y1:y2, x1:x2]
+            all_crops.append(player_crop)
+            crop_metadata.append((frame_idx, track_id, x1, y1))
+
+    # 2. Run Inference in Batches (Much Faster)
+    # We process 24 crops at a time to saturate the GPU without running out of memory
+    BATCH_SIZE = constants.BATCH_SIZE
+    all_pose_results = []
+    
+    # Process using a progress bar if you want, or just a range loop
+    for i in range(0, len(all_crops), BATCH_SIZE):
+        batch_crops = all_crops[i : i + BATCH_SIZE]
+        
+        # verbose=False prevents it from printing 1000s of lines
+        # stream=False ensures we get a list of results back immediately
+        batch_results = pose_estimator(batch_crops, verbose=False, stream=False)
+        all_pose_results.extend(batch_results)
+
+    # 3. Map Results Back to Player Detections
+    for i, result in enumerate(all_pose_results):
+        frame_idx, track_id, crop_x1, crop_y1 = crop_metadata[i]
+        
+        found_keypoints = False
+        if result.keypoints is not None and len(result.keypoints.data) > 0:
+            # Extract keypoints (17, 3)
+            kpts = result.keypoints.data[0].cpu().numpy()
             
-            # Run Pose Estimation on the crop
-            # verbose=False keeps the console clean
-            results = pose_estimator(player_crop, verbose=False)[0]
+            # Add the crop offset to map back to original frame coordinates
+            kpts[:, 0] += crop_x1
+            kpts[:, 1] += crop_y1
             
-            found_keypoints = False
-            if results.keypoints is not None and len(results.keypoints.data) > 0:
-                # Extract the first skeleton found in the crop
-                kpts = results.keypoints.data[0].cpu().numpy() # Shape (17, 3)
-                
-                # IMPORTANT: Transform crop coordinates back to full frame coordinates
-                kpts[:, 0] += x1 # Add crop offset X
-                kpts[:, 1] += y1 # Add crop offset Y
-                
-                # Update the detection dictionary with the real keypoints
-                frame_dict[track_id]['keypoints'] = kpts.tolist()
-                found_keypoints = True
-            
-            if not found_keypoints:
-                # If pose model fails to find a person in the crop, set empty
-                frame_dict[track_id]['keypoints'] = []
+            player_detections[frame_idx][track_id]['keypoints'] = kpts.tolist()
+            found_keypoints = True
+        
+        if not found_keypoints:
+            player_detections[frame_idx][track_id]['keypoints'] = []
 
     # KEYPOINT SMOOTHING 
     # Doing it here updates 'player_detections' IN PLACE.
