@@ -185,15 +185,15 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     # We create a fake 20x20 box around the center.
     ball_detections_boxes = []
     for pos in ball_detections:
-        # Check if position is valid (not None or NaN)
         if pos is None or pos[0] is None or np.isnan(pos[0]):
-            ball_detections_boxes.append([0, 0, 0, 0]) # Empty box for missing frames
+            # Use an empty box inside a dictionary
+            ball_detections_boxes.append({1: [0, 0, 0, 0]}) 
         else:
             x, y = pos
-            pad = 10 # 20x20 pixel box
-            ball_detections_boxes.append([x-pad, y-pad, x+pad, y+pad])
+            pad = 10 
+            # WRAP IN DICT: {1: [x1, y1, x2, y2]}
+            ball_detections_boxes.append({1: [x-pad, y-pad, x+pad, y+pad]})
     
-    # Overwrite the variable with the box format
     ball_detections = ball_detections_boxes
     # ------------------------------------
 
