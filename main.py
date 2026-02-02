@@ -179,6 +179,24 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     # Detect ball shots
     ball_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
 
+    # --- FIX: CONVERT POINTS TO BOXES ---
+    # MiniCourt and Draw functions expect Bounding Boxes [x1, y1, x2, y2],
+    # but our new Tracker returns Center Points (x, y).
+    # We create a fake 20x20 box around the center.
+    ball_detections_boxes = []
+    for pos in ball_detections:
+        # Check if position is valid (not None or NaN)
+        if pos is None or pos[0] is None or np.isnan(pos[0]):
+            ball_detections_boxes.append([0, 0, 0, 0]) # Empty box for missing frames
+        else:
+            x, y = pos
+            pad = 10 # 20x20 pixel box
+            ball_detections_boxes.append([x-pad, y-pad, x+pad, y+pad])
+    
+    # Overwrite the variable with the box format
+    ball_detections = ball_detections_boxes
+    # ------------------------------------
+
     # Convert positions to mini court positions
     player_mini_court_detections, ball_mini_court_detections = mini_court.convert_bounding_boxes_to_mini_court_coordinates(
                                                                             player_detections, 
