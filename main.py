@@ -397,6 +397,45 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         with torch.no_grad():
             output = action_model(inp_tensor)
             
+            # --- FIX 1: BASELINE VOLLEY HALLUCINATION ---
+            # Logic: If player is far from the net (> 4m), they cannot be hitting a volley.
+            player_mc_pos = player_mini_court_detections[start_frame][player_shot_ball]
+            
+            # Calculate Net Y position (Midpoint of the court drawing)
+            net_y = (mini_court.court_start_y + mini_court.court_end_y) / 2
+            
+            # Distance from Net
+            dist_from_net_pixels = abs(player_mc_pos[1] - net_y)
+            dist_from_net_meters = convert_pixel_distance_to_meters(
+                dist_from_net_pixels, 
+                constants.DOUBLE_LINE_WIDTH,
+                mini_court.get_width_of_mini_court()
+            )
+            
+            if dist_from_net_meters > 4.0: # If > 4 meters from net
+                 for idx, class_name in enumerate(constants.THETIS_CLASSES):
+                     if "volley" in class_name:
+                         output[0][idx] = -float('inf')
+
+            # --- FIX 2: SERVICE & SMASH CONFUSION (HEIGHT CHECK) ---
+            # Logic: Serves/Smashes happen ABOVE the head. If ball is below nose, ban them.
+            
+            # Get Nose Y (Keypoint 0)
+            shooter_kpts = player_detections[start_frame][player_shot_ball].get('keypoints', [])
+            if shooter_kpts and len(shooter_kpts) > 0:
+                nose_y = shooter_kpts[0][1]
+                
+                # Get Ball Y (Center of box)
+                ball_box = ball_detections[start_frame][1]
+                ball_y = (ball_box[1] + ball_box[3]) / 2
+                
+                # Image Coordinates: Y increases downwards.
+                # So if Ball Y > Nose Y, the ball is BELOW the nose.
+                if ball_y > nose_y:
+                    for idx, class_name in enumerate(constants.THETIS_CLASSES):
+                        if "service" in class_name or "smash" in class_name:
+                            output[0][idx] = -float('inf')
+
             # Ban Serve after FRAME_LIMIT frames
             if start_frame > constants.FRAME_LIMIT_FOR_SERVES:
                 # If a class name contains "service", kill its probability.
