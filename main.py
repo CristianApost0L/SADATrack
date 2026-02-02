@@ -397,57 +397,44 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         with torch.no_grad():
             output = action_model(inp_tensor)
             
-            # ---------------------------------------------------------------------
-            # FIX 1: ROBUST "ZONE-BASED" VOLLEY FILTER (No Meters involved)
-            # ---------------------------------------------------------------------
+            # --- FIX 1: BASELINE VOLLEY HALLUCINATION ---
+            # Logic: If player is far from the net (> 4m), they cannot be hitting a volley.
             player_mc_pos = player_mini_court_detections[start_frame][player_shot_ball]
-            player_y = player_mc_pos[1]
             
-            # MiniCourt Boundaries (Pixels)
-            court_top = mini_court.court_start_y
-            court_bottom = mini_court.court_end_y
-            court_len = court_bottom - court_top
-
-            # Define "Deep Zones" (Back 30% of the court)
-            # If a player is here, they are simply too far back to volley.
-            is_deep_zone = False
+            # Calculate Net Y position (Midpoint of the court drawing)
+            net_y = (mini_court.court_start_y + mini_court.court_end_y) / 2
             
-            if mapped_shooter_id == 1:
-                # Player 1 (Bottom): Deep zone is the bottom 30%
-                if player_y > (court_bottom - (0.30 * court_len)):
-                    is_deep_zone = True
-            else:
-                # Player 2 (Top): Deep zone is the top 30%
-                if player_y < (court_top + (0.30 * court_len)):
-                    is_deep_zone = True
+            # Distance from Net
+            dist_from_net_pixels = abs(player_mc_pos[1] - net_y)
+            dist_from_net_meters = convert_pixel_distance_to_meters(
+                dist_from_net_pixels, 
+                constants.DOUBLE_LINE_WIDTH,
+                mini_court.get_width_of_mini_court()
+            )
             
-            if is_deep_zone:
+            if dist_from_net_meters > 4.0: # If > 4 meters from net
                  for idx, class_name in enumerate(constants.THETIS_CLASSES):
                      if "volley" in class_name:
                          output[0][idx] = -float('inf')
 
-            # ---------------------------------------------------------------------
-            # FIX 2: SERVICE & SMASH LOGIC (HEIGHT CHECK + BOOSTER)
-            # ---------------------------------------------------------------------
+            # --- FIX 2: SERVICE & SMASH CONFUSION (HEIGHT CHECK) ---
+            # Logic: Serves/Smashes happen ABOVE the head. If ball is below nose, ban them.
+            
+            # Get Nose Y (Keypoint 0)
             shooter_kpts = player_detections[start_frame][player_shot_ball].get('keypoints', [])
             if shooter_kpts and len(shooter_kpts) > 0:
                 nose_y = shooter_kpts[0][1]
                 
+                # Get Ball Y (Center of box)
                 ball_box = ball_detections[start_frame][1]
                 ball_y = (ball_box[1] + ball_box[3]) / 2
                 
-                # CASE A: Ball is BELOW head (Ball Y > Nose Y) -> BAN Service/Smash
+                # Image Coordinates: Y increases downwards.
+                # So if Ball Y > Nose Y, the ball is BELOW the nose.
                 if ball_y > nose_y:
                     for idx, class_name in enumerate(constants.THETIS_CLASSES):
                         if "service" in class_name or "smash" in class_name:
                             output[0][idx] = -float('inf')
-                            
-                # CASE B: Ball is HIGH ABOVE head (Ball Y < Nose Y - 30px) -> BOOST Service/Smash
-                # This fixes "Gauff Frame 8" where a Service is weak and detected as Backhand.
-                elif ball_y < (nose_y - 30): 
-                    for idx, class_name in enumerate(constants.THETIS_CLASSES):
-                        if "service" in class_name or "smash" in class_name:
-                            output[0][idx] += 3.0 # Strong boost to logit
 
             # Ban Serve after FRAME_LIMIT frames
             if start_frame > constants.FRAME_LIMIT_FOR_SERVES:
