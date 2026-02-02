@@ -6,7 +6,8 @@ from utils import (read_video,
                    draw_skeletons,
                    enhance_video_contrast,
                    smooth_keypoints,
-                   print_validation_report
+                   print_validation_report,
+                   filter_adjacent_frames
                    )
 import constants
 from trackers import PlayerTracker, BallTracker, BounceDetector 
@@ -87,6 +88,10 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     # 1. Get ALL candidates (Hits + Bounces) using geometric heuristic
     candidate_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
     
+    # Merge frames like [141, 145, 147] into just [141]
+    # 24 frames = 1 second buffer (physically impossible to hit 2 shots in 1 sec)
+    candidate_shot_frames = filter_adjacent_frames(candidate_shot_frames, min_distance=24)
+
     # 2. Detect Bounces using the new Model
     detected_bounces = []
     # Pass the list of (x,y) tuples directly
