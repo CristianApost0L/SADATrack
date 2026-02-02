@@ -9,9 +9,9 @@ class CourtLineDetector:
         self.model = models.resnet50(pretrained=True)
         self.model.fc = torch.nn.Linear(self.model.fc.in_features, 14*2) 
         
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.model.load_state_dict(torch.load(model_path, map_location=device))
-        self.model.to(device)
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu' # Detect GPU
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.model.to(self.device) # Move model to GPU
         
         self.transform = transforms.Compose([
             transforms.ToPILImage(),
@@ -24,7 +24,7 @@ class CourtLineDetector:
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image_tensor = self.transform(image_rgb).unsqueeze(0)
         with torch.no_grad():
-            outputs = self.model(image_tensor)
+            outputs = self.model(image_tensor.to(self.device))
         keypoints = outputs.squeeze().cpu().numpy()
         original_h, original_w = image.shape[:2]
         keypoints[::2] *= original_w / 224.0
