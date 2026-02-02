@@ -15,3 +15,21 @@ def filter_adjacent_frames(frame_list, min_distance=24):
             filtered_frames.append(frame)
             
     return filtered_frames
+
+# Helper function to measure distance from ball to nearest player
+def get_proximity_score(frame_idx):
+    ball_pos = ball_detections[frame_idx]
+    if ball_pos is None: return float('inf')
+    bx, by = ball_pos
+    
+    min_dist = float('inf')
+    # Check against all players detected in this frame
+    if frame_idx < len(player_detections):
+        for pid, p_data in player_detections[frame_idx].items():
+            bbox = p_data['bbox']
+            # Player Center
+            px = (bbox[0] + bbox[2]) / 2
+            py = (bbox[1] + bbox[3]) / 2
+            dist = ((bx - px)**2 + (by - py)**2)**0.5
+            if dist < min_dist: min_dist = dist
+    return min_dist

@@ -7,7 +7,8 @@ from utils import (read_video,
                    enhance_video_contrast,
                    smooth_keypoints,
                    print_validation_report,
-                   filter_adjacent_frames
+                   filter_adjacent_frames,
+                   get_proximity_score
                    )
 import constants
 from trackers import PlayerTracker, BallTracker, BounceDetector 
@@ -109,9 +110,37 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         if not is_bounce:
             clean_candidates.append(frame)
 
-    ball_shot_frames = filter_adjacent_frames(clean_candidates, min_distance=24)
+    # SMART FILTERING: Group frames and pick the one CLOSEST to a player
+    # Instead of just taking the first frame (filter_adjacent_frames), we verify proximity.
+    
+    ball_shot_frames = []
+    
+    if clean_candidates:
+        clean_candidates.sort()
+        current_group = [clean_candidates[0]]
+        
+        # Iterate and group
+        for i in range(1, len(clean_candidates)):
+            frame = clean_candidates[i]
+            prev_frame = current_group[-1]
+            
+            # If frames are close (within 24 frames / 1 sec), they belong to the same "Shot Event"
+            if frame - prev_frame <= 24:
+                current_group.append(frame)
+            else:
+                # Group finished -> Pick the Best Frame in this group
+                best_frame = min(current_group, key=get_proximity_score)
+                ball_shot_frames.append(best_frame)
+                
+                # Start new group
+                current_group = [frame]
+        
+        # Process the final group
+        if current_group:
+            best_frame = min(current_group, key=get_proximity_score)
+            ball_shot_frames.append(best_frame)
 
-    print(f"Refined Shots: {len(ball_shot_frames)} (Filtered out {len(candidate_shot_frames) - len(ball_shot_frames)} bounces)")
+    print(f"Refined Shots: {len(ball_shot_frames)} (Filtered noise by Proximity)")
     
     # --- 4. COURT DETECTION (Use ENHANCED frames) ---
     # Lines are often faint, so contrast enhancement helps here too
