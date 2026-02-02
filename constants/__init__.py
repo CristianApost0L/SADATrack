@@ -18,3 +18,5 @@ THETIS_CLASSES = [
 TARGET_FPS = 24 # Target FPS for videos
 
 COURT_INFER_INTERVAL = 12 # Refresh court keypoints every half second (24 FPS videos)
+
+FRAME_LIMIT_FOR_SERVES = 40 # From frames 0-40 we will allow serves, from frame 41 serves will be disabled

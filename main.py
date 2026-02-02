@@ -91,7 +91,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     detected_bounces = []
     # Pass the list of (x,y) tuples directly
     detected_bounces = bounce_detector.predict(ball_detections) 
-    
+
     # 3. Filter: Keep a candidate ONLY if it is NOT a bounce
     ball_shot_frames = []
     for frame in candidate_shot_frames:
@@ -325,7 +325,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
             output = action_model(inp_tensor)
             
             # Ban Serve after first shot
-            if ball_shot_ind > 0:
+            if ball_shot_ind > constants.FRAME_LIMIT_FOR_SERVES:
                 # If a class name contains "service", kill its probability.
                 for idx, class_name in enumerate(constants.THETIS_CLASSES):
                     if "service" in class_name:
