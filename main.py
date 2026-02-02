@@ -76,11 +76,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     # --- 3. DETECT BALL (Use RAW frames) ---
     # This ignores the noisy/grainy enhanced frames and looks at the clean original
     print("Detecting Ball on Raw Video...")
-    ball_detections = ball_tracker.detect_frames(raw_frames,
-                                                     read_from_stub=False,
-                                                     stub_path="tracker_stubs/ball_detections.pkl",
-                                                     yolo_verbosity=yolo_verbosity
-                                                     )
+    ball_detections = ball_tracker.detect_frames(raw_frames)
     
     # Interpolate ball (standard step)
     ball_detections = ball_tracker.interpolate_ball_positions(ball_detections)
