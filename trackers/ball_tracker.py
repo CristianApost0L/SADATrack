@@ -21,10 +21,6 @@ class BallTracker:
         self.height = 360
 
     def detect_frames(self, frames):
-        """
-        Run model on a list of consecutive video frames.
-        Returns a list of (x, y) coordinates.
-        """
         ball_track = [(None, None)]*2
         prev_pred = [None, None]
         
@@ -32,22 +28,34 @@ class BallTracker:
         original_h, original_w = frames[0].shape[:2]
         
         # 2. Calculate Scale Factors
-        # We need to multiply the model's output (x,y) by these to get back to original size
-        scale_x = original_w / self.width   # e.g. 1920 / 640 = 3.0
-        scale_y = original_h / self.height  # e.g. 1080 / 360 = 3.0
+        scale_x = original_w / self.width
+        scale_y = original_h / self.height
 
         print("Running Ball Tracking...")
         for num in tqdm(range(2, len(frames))):
-            # ... (Resize and Inference code remains the same) ...
+            # Resize 3 consecutive frames
             img = cv2.resize(frames[num], (self.width, self.height))
-            # ... (stacking logic) ...
+            img_prev = cv2.resize(frames[num-1], (self.width, self.height))
+            img_preprev = cv2.resize(frames[num-2], (self.width, self.height))
             
+            # Stack frames: (Height, Width, 9) -> (3 frames * 3 channels)
+            imgs = np.concatenate((img, img_prev, img_preprev), axis=2)
+            
+            # Normalize (0-255 -> 0-1)
+            imgs = imgs.astype(np.float32) / 255.0
+            
+            # Transpose to PyTorch format: (Channels, Height, Width)
+            imgs = np.rollaxis(imgs, 2, 0)
+            
+            # Add Batch Dimension: (1, 9, 360, 640)
+            inp = np.expand_dims(imgs, axis=0)
+
+            # Inference
             with torch.no_grad():
                 out = self.model(torch.from_numpy(inp).float().to(self.device))
                 output = out.argmax(dim=1).detach().cpu().numpy()
                 
-            # 3. Pass Scales to Postprocess
-            # We pass the calculated scales instead of a hardcoded value
+            # Post-process with dynamic scales
             x_pred, y_pred = self.postprocess(output, prev_pred, scale_x, scale_y)
             
             prev_pred = [x_pred, y_pred]
