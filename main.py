@@ -63,7 +63,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
 
     # Initialize Trackers
     player_tracker = PlayerTracker(model_path='/kaggle/input/cv-project/yolo26x.pt')
-    ball_tracker = BallTracker(model_path='/kaggle/input/cv-project/yolo5_last.pt')
+    ball_tracker = BallTracker(model_path='/kaggle/input/cv-project/ball_model_best.pt') #Amin model
 
     # --- 2. DETECT PLAYERS (Use ENHANCED frames) ---
     print("Detecting Players on Enhanced Video...")

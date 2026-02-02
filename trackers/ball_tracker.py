@@ -1,97 +1,90 @@
-from ultralytics import YOLO 
 import cv2
-import pickle
-import pandas as pd
+import torch
+import numpy as np
+from tqdm import tqdm
+from scipy.spatial import distance
+from models.tracknet import BallTrackerNet
 
 class BallTracker:
-    def __init__(self,model_path):
-        self.model = YOLO(model_path)
-
-    def interpolate_ball_positions(self, ball_positions):
-        ball_positions = [x.get(1,[]) for x in ball_positions]
-        # convert the list into pandas dataframe
-        df_ball_positions = pd.DataFrame(ball_positions,columns=['x1','y1','x2','y2'])
-
-        # interpolate the missing values
-        df_ball_positions = df_ball_positions.interpolate()
-        df_ball_positions = df_ball_positions.bfill()
-
-        ball_positions = [{1:x} for x in df_ball_positions.to_numpy().tolist()]
-
-        return ball_positions
-
-    def get_ball_shot_frames(self,ball_positions):
-        ball_positions = [x.get(1,[]) for x in ball_positions]
-        # convert the list into pandas dataframe
-        df_ball_positions = pd.DataFrame(ball_positions,columns=['x1','y1','x2','y2'])
-
-        df_ball_positions['ball_hit'] = 0
-
-        df_ball_positions['mid_y'] = (df_ball_positions['y1'] + df_ball_positions['y2'])/2
-        df_ball_positions['mid_y_rolling_mean'] = df_ball_positions['mid_y'].rolling(window=5, min_periods=1, center=False).mean()
-        df_ball_positions['delta_y'] = df_ball_positions['mid_y_rolling_mean'].diff()
-        minimum_change_frames_for_hit = 25
-        for i in range(1,len(df_ball_positions)- int(minimum_change_frames_for_hit*1.2) ):
-            negative_position_change = df_ball_positions['delta_y'].iloc[i] >0 and df_ball_positions['delta_y'].iloc[i+1] <0
-            positive_position_change = df_ball_positions['delta_y'].iloc[i] <0 and df_ball_positions['delta_y'].iloc[i+1] >0
-
-            if negative_position_change or positive_position_change:
-                change_count = 0 
-                for change_frame in range(i+1, i+int(minimum_change_frames_for_hit*1.2)+1):
-                    negative_position_change_following_frame = df_ball_positions['delta_y'].iloc[i] >0 and df_ball_positions['delta_y'].iloc[change_frame] <0
-                    positive_position_change_following_frame = df_ball_positions['delta_y'].iloc[i] <0 and df_ball_positions['delta_y'].iloc[change_frame] >0
-
-                    if negative_position_change and negative_position_change_following_frame:
-                        change_count+=1
-                    elif positive_position_change and positive_position_change_following_frame:
-                        change_count+=1
+    def __init__(self, model_path, device='cuda'):
+        # Input channels=9 (3 frames * 3 RGB), Out channels=256 (Heatmap depth)
+        self.model = BallTrackerNet(input_channels=9, out_channels=256)
+        self.device = device
+        
+        if model_path:
+            self.model.load_state_dict(torch.load(model_path, map_location=device))
+            self.model = self.model.to(device)
+            self.model.eval()
             
-                if change_count>minimum_change_frames_for_hit-1:
-                    df_ball_positions['ball_hit'].iloc[i] = 1
+        # Model expects this input resolution
+        self.width = 640
+        self.height = 360
 
-        frame_nums_with_ball_hits = df_ball_positions[df_ball_positions['ball_hit']==1].index.tolist()
-
-        return frame_nums_with_ball_hits
-
-    def detect_frames(self, frames, yolo_verbosity = False, read_from_stub=False, stub_path=None):
-        ball_detections = []
-
-        if read_from_stub and stub_path is not None:
-            with open(stub_path, 'rb') as f:
-                ball_detections = pickle.load(f)
-            return ball_detections
-
-        for frame in frames:
-            player_dict = self.detect_frame(frame, yolo_verbosity)
-            ball_detections.append(player_dict)
+    def detect_frames(self, frames):
+        """
+        Run model on a list of consecutive video frames.
+        Returns a list of (x, y) coordinates.
+        """
+        ball_track = [(None, None)]*2
+        prev_pred = [None, None]
         
-        if stub_path is not None:
-            with open(stub_path, 'wb') as f:
-                pickle.dump(ball_detections, f)
+        print("Running Ball Tracking...")
+        for num in tqdm(range(2, len(frames))):
+            # Resize frames to model input size
+            img = cv2.resize(frames[num], (self.width, self.height))
+            img_prev = cv2.resize(frames[num-1], (self.width, self.height))
+            img_preprev = cv2.resize(frames[num-2], (self.width, self.height))
+            
+            # Stack frames (9 channels total)
+            imgs = np.concatenate((img, img_prev, img_preprev), axis=2)
+            imgs = imgs.astype(np.float32)/255.0
+            imgs = np.rollaxis(imgs, 2, 0)
+            inp = np.expand_dims(imgs, axis=0)
+
+            # Inference
+            with torch.no_grad():
+                out = self.model(torch.from_numpy(inp).float().to(self.device))
+                output = out.argmax(dim=1).detach().cpu().numpy()
+                
+            x_pred, y_pred = self.postprocess(output, prev_pred)
+            prev_pred = [x_pred, y_pred]
+            ball_track.append((x_pred, y_pred))
+            
+        return ball_track
+
+    def postprocess(self, feature_map, prev_pred, scale=2, max_dist=80):
+        """
+        Extracts ball coordinates from the heatmap using HoughCircles.
+        """
+        feature_map *= 255
+        feature_map = feature_map.reshape((self.height, self.width))
+        feature_map = feature_map.astype(np.uint8)
+        ret, heatmap = cv2.threshold(feature_map, 127, 255, cv2.THRESH_BINARY)
         
-        return ball_detections
-
-    def detect_frame(self,frame, yolo_verbosity):
-        results = self.model.predict(frame,conf=0.15, verbose = yolo_verbosity)[0]
-
-        ball_dict = {}
-        for box in results.boxes:
-            result = box.xyxy.tolist()[0]
-            ball_dict[1] = result
+        circles = cv2.HoughCircles(heatmap, cv2.HOUGH_GRADIENT, dp=1, minDist=1, 
+                                   param1=50, param2=2, minRadius=2, maxRadius=7)
+        x, y = None, None
         
-        return ball_dict
-
-    def draw_bboxes(self,video_frames, player_detections):
-        output_video_frames = []
-        for frame, ball_dict in zip(video_frames, player_detections):
-            # Draw Bounding Boxes
-            for track_id, bbox in ball_dict.items():
-                x1, y1, x2, y2 = bbox
-                cv2.putText(frame, f"Ball ID: {track_id}",(int(bbox[0]),int(bbox[1] -10 )),cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 2)
-                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 255), 2)
-            output_video_frames.append(frame)
+        if circles is not None:
+            # If we have a previous detection, use it to filter outliers
+            if prev_pred[0]:
+                for i in range(len(circles[0])):
+                    x_temp = circles[0][i][0]*scale
+                    y_temp = circles[0][i][1]*scale
+                    dist = distance.euclidean((x_temp, y_temp), prev_pred)
+                    if dist < max_dist:
+                        x, y = x_temp, y_temp
+                        break                
+            else:
+                # If no previous detection, take the first/strongest circle
+                x = circles[0][0][0]*scale
+                y = circles[0][0][1]*scale
         
-        return output_video_frames
-
-
+        return x, y
     
+    def interpolate_ball_positions(self, ball_track):
+        # Helper to fill None values using pandas interpolation (from notebook logic)
+        import pandas as pd
+        df = pd.DataFrame(ball_track, columns=['x', 'y'])
+        df = df.interpolate()
+        return list(zip(df['x'], df['y']))
