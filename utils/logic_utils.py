@@ -17,7 +17,7 @@ def filter_adjacent_frames(frame_list, min_distance=24):
     return filtered_frames
 
 # Helper function to measure distance from ball to nearest player
-def get_proximity_score(frame_idx):
+def get_proximity_score(ball_detections, player_detections, frame_idx):
     ball_pos = ball_detections[frame_idx]
     if ball_pos is None: return float('inf')
     bx, by = ball_pos
