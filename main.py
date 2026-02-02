@@ -96,7 +96,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     detected_bounces = bounce_detector.predict(ball_detections) 
 
     # 3. Filter: Keep a candidate ONLY if it is NOT a bounce
-    ball_shot_frames = []
+    clean_candidates = []
     for frame in candidate_shot_frames:
         # Check if this frame is close to any detected bounce (within margin of error, e.g., 3 frames)
         is_bounce = False
@@ -107,8 +107,10 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         
         # If it's not a bounce, it's a hit!
         if not is_bounce:
-            ball_shot_frames.append(frame)
+            clean_candidates.append(frame)
 
+    ball_shot_frames = filter_adjacent_frames(clean_candidates, min_distance=24)
+    
     print(f"Refined Shots: {len(ball_shot_frames)} (Filtered out {len(candidate_shot_frames) - len(ball_shot_frames)} bounces)")
     
     # --- 4. COURT DETECTION (Use ENHANCED frames) ---
