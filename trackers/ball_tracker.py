@@ -51,6 +51,40 @@ class BallTracker:
             ball_track.append((x_pred, y_pred))
             
         return ball_track
+    
+    def get_ball_shot_frames(self, ball_positions):
+        """
+        Identifies frames where the ball changes direction vertically (hits or bounces).
+        main.py will later filter these to ensure a player is close enough to hit it.
+        """
+        ball_shot_frames = []
+        
+        # We need a small buffer to detect direction change
+        for i in range(1, len(ball_positions)-1):
+            curr_pos = ball_positions[i]
+            prev_pos = ball_positions[i-1]
+            next_pos = ball_positions[i+1]
+            
+            # Skip if tracking was lost in any of these frames
+            if curr_pos is None or prev_pos is None or next_pos is None:
+                continue
+            
+            # Check only the Y coordinates (vertical movement)
+            # Tuple structure is (x, y)
+            y_prev = prev_pos[1]
+            y_curr = curr_pos[1]
+            y_next = next_pos[1]
+            
+            # DETECT PEAK OR VALLEY
+            # Case 1: Ball was going down, now going up (Valley)
+            if y_prev < y_curr and y_curr > y_next:
+                ball_shot_frames.append(i)
+                
+            # Case 2: Ball was going up, now going down (Peak)
+            elif y_prev > y_curr and y_curr < y_next:
+                ball_shot_frames.append(i)
+
+        return ball_shot_frames
 
     def postprocess(self, feature_map, prev_pred, scale=2, max_dist=80):
         """
