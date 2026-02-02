@@ -189,18 +189,57 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     print("Smoothing skeleton keypoints...")
     player_detections = smooth_keypoints(player_detections)
 
-    # --- DYNAMIC ID MAPPING ---
-    # Map the actual Track IDs (e.g. 5, 23) to "Player 1" and "Player 2"
-    all_track_ids = set()
-    for frame_dict in player_detections:
-        all_track_ids.update(frame_dict.keys())
-    sorted_ids = sorted(list(all_track_ids))
+    # --- DYNAMIC ID MAPPING (IMPROVED) ---
+    # Goal: Robustly identify Player 1 (Closest/Bottom) and Player 2 (Farthest/Top)
     
-    player_id_map = {} # Maps TrackID -> 1 or 2
-    if len(sorted_ids) >= 1: player_id_map[sorted_ids[0]] = 1
-    if len(sorted_ids) >= 2: player_id_map[sorted_ids[1]] = 2
-    # Map any extras to 1 to prevent crashes
-    for pid in sorted_ids[2:]: player_id_map[pid] = 1
+    # 1. Filter Noise: Find the two most frequent Track IDs
+    id_occupancy = {}
+    for frame_dict in player_detections:
+        for track_id in frame_dict.keys():
+            id_occupancy[track_id] = id_occupancy.get(track_id, 0) + 1
+            
+    # Select top 2 IDs based on how many frames they appear in
+    # This removes ball boys or line judges who are only detected briefly
+    valid_ids = sorted(id_occupancy, key=id_occupancy.get, reverse=True)[:2]
+    
+    # 2. Assign IDs based on "Size" (Bounding Box Height)
+    # The closer player (Player 1) will have a larger bounding box height.
+    id_avg_height = {}
+    
+    for pid in valid_ids:
+        heights = []
+        for frame_dict in player_detections:
+            if pid in frame_dict:
+                bbox = frame_dict[pid]['bbox']
+                # Calculate height: y2 - y1
+                h = bbox[3] - bbox[1]
+                heights.append(h)
+        
+        # Calculate average height for this player ID
+        if heights:
+            id_avg_height[pid] = sum(heights) / len(heights)
+        else:
+            id_avg_height[pid] = 0
+
+    # Sort IDs by Height: Largest (Closest) -> Smallest (Farthest)
+    sorted_ids = sorted(valid_ids, key=lambda x: id_avg_height.get(x, 0), reverse=True)
+    
+    player_id_map = {} 
+    # Assign Player 1 to the largest ID
+    if len(sorted_ids) >= 1: 
+        player_id_map[sorted_ids[0]] = 1
+        print(f"Identified Player 1 (Closest): Track ID {sorted_ids[0]} (Avg Height: {id_avg_height[sorted_ids[0]]:.1f}px)")
+        
+    # Assign Player 2 to the smaller ID
+    if len(sorted_ids) >= 2: 
+        player_id_map[sorted_ids[1]] = 2
+        print(f"Identified Player 2 (Farthest): Track ID {sorted_ids[1]} (Avg Height: {id_avg_height[sorted_ids[1]]:.1f}px)")
+    
+    # Fallback: Map any other stray IDs to Player 1 to prevent crashes
+    all_detected_ids = set(id_occupancy.keys())
+    for pid in all_detected_ids:
+        if pid not in player_id_map:
+            player_id_map[pid] = 1
 
     # MiniCourt
     mini_court = MiniCourt(raw_frames[0]) 
@@ -327,8 +366,8 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         with torch.no_grad():
             output = action_model(inp_tensor)
             
-            # Ban Serve after first shot
-            if ball_shot_ind > constants.FRAME_LIMIT_FOR_SERVES:
+            # Ban Serve after FRAME_LIMIT frames
+            if start_frame > constants.FRAME_LIMIT_FOR_SERVES:
                 # If a class name contains "service", kill its probability.
                 for idx, class_name in enumerate(constants.THETIS_CLASSES):
                     if "service" in class_name:

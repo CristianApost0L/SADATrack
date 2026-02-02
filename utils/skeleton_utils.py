@@ -1,4 +1,4 @@
-def smooth_keypoints(player_detections, window_length=5):
+def smooth_keypoints(player_detections, window_length=3):
     """
     Applies a moving average filter to keypoints to reduce jitter.
     """
