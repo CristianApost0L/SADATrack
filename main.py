@@ -389,7 +389,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         current_player_stats['shot_type'] = shot_name
 
         current_player_stats['shot_player_id'] = mapped_shooter_id
-        
+
         print(f"Frame {start_frame}: | Prediction: {shot_name} | Player: {player_shot_ball} (Mapped: {mapped_shooter_id})")
         
         # D. Opponent Speed (CRITICAL FIX FOR KEYERROR 2)
@@ -461,31 +461,43 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         current_stats = player_stats_data_df.iloc[i]
         shot_type = current_stats['shot_type']
         
+        # Check if we have a valid shot type
         if shot_type is not None and str(shot_type) != 'nan':
-            text = f"Shot: {shot_type}"
             
-            # 2. Initial Font Settings
+            # 1. Format the text: "Forehand Flat" instead of "forehand_flat"
+            shot_name = str(shot_type).replace('_', ' ').title()
+            
+            # 2. Add Player ID: "Forehand Flat (P1)"
+            # Use .get() to avoid errors if the column is missing
+            shot_player_id = current_stats.get('shot_player_id')
+            
+            if shot_player_id is not None and str(shot_player_id) != 'nan':
+                # Convert to int (handles 1.0 -> 1)
+                p_id = int(float(shot_player_id))
+                text = f"{shot_name} (P{p_id})"
+            else:
+                text = f"{shot_name}"
+            
+            # 3. Font Settings (Normalized Size)
             font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 1
             thickness = 2
             
-            # 3. Dynamic Scaling Loop
-            # Check size and shrink if larger than minimap
+            # Use a FIXED, larger font scale by default for consistency
+            font_scale = 0.65 
+            
+            # 4. Safety Check: Only shrink if it physically doesn't fit the box
             (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, thickness)
             
-            while text_width > minimap_width and font_scale > 0.1:
-                font_scale -= 0.1
+            while text_width > minimap_width and font_scale > 0.4:
+                font_scale -= 0.05
                 (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, thickness)
             
-            # 4. Center Text horizontally relative to Minimap
-            # X = Start of Minimap + (Half Minimap - Half Text)
+            # 5. Center Text horizontally relative to Minimap
             text_x = int(minimap_start_x + (minimap_width - text_width) / 2)
-            text_y = int(minimap_end_y + 30 + text_height) # 30px padding below minimap
+            text_y = int(minimap_end_y + 30 + text_height) # Padding below minimap
 
-            # 5. Draw
-            # Black outline for visibility
+            # 6. Draw (Black Outline + White Text)
             cv2.putText(frame, text, (text_x, text_y), font, font_scale, (0, 0, 0), thickness + 2)
-            # White text
             cv2.putText(frame, text, (text_x, text_y), font, font_scale, (255, 255, 255), thickness)
 
     ## Draw frame number on top left corner
