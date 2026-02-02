@@ -110,7 +110,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
             clean_candidates.append(frame)
 
     ball_shot_frames = filter_adjacent_frames(clean_candidates, min_distance=24)
-    
+
     print(f"Refined Shots: {len(ball_shot_frames)} (Filtered out {len(candidate_shot_frames) - len(ball_shot_frames)} bounces)")
     
     # --- 4. COURT DETECTION (Use ENHANCED frames) ---
@@ -387,6 +387,9 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         })
 
         current_player_stats['shot_type'] = shot_name
+
+        current_player_stats['shot_player_id'] = mapped_shooter_id
+        
         print(f"Frame {start_frame}: | Prediction: {shot_name} | Player: {player_shot_ball} (Mapped: {mapped_shooter_id})")
         
         # D. Opponent Speed (CRITICAL FIX FOR KEYERROR 2)

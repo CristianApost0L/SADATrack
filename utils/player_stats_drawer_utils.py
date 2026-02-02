@@ -21,6 +21,12 @@ def draw_player_stats(output_video_frames,player_stats):
         if str(shot_type) == 'nan':
             shot_type = ""
 
+        shot_player = row.get('shot_player_id', '')
+        if str(shot_player) == 'nan' or str(shot_player) == '0': 
+            shot_player = ""
+        else:
+            shot_player = int(shot_player)
+
         frame = output_video_frames[index]
         shapes = np.zeros_like(frame, np.uint8)
 
@@ -65,7 +71,13 @@ def draw_player_stats(output_video_frames,player_stats):
         # --- NEW SECTION: Draw Shot Type ---
         text = "Shot Type"
         output_video_frames[index] = cv2.putText(output_video_frames[index], text, (start_x + 10, start_y + 240), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
-        # We display the shot type in the center since it applies to the last event
-        output_video_frames[index] = cv2.putText(output_video_frames[index], str(shot_type), (start_x + 130, start_y + 240), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        
+        # Construct the display text: e.g. "Forehand (P1)"
+        if shot_type:
+            display_text = f"{shot_type} (P{shot_player})" if shot_player else str(shot_type)
+        else:
+            display_text = ""
+
+        output_video_frames[index] = cv2.putText(output_video_frames[index], display_text, (start_x + 130, start_y + 240), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
 
     return output_video_frames
