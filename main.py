@@ -72,8 +72,6 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     # --- 2. DETECT PLAYERS (Use ENHANCED frames) ---
     print("Detecting Players on Enhanced Video...")
     player_detections = player_tracker.detect_frames(enhanced_frames,
-                                                     read_from_stub=False,
-                                                     stub_path="tracker_stubs/player_detections.pkl",
                                                      yolo_verbosity=yolo_verbosity
                                                      )
     

@@ -88,21 +88,12 @@ class PlayerTracker:
         chosen_players = [distances[0][0], distances[1][0]]
         return chosen_players
 
-    def detect_frames(self, frames, yolo_verbosity = False, read_from_stub=False, stub_path=None):
+    def detect_frames(self, frames, yolo_verbosity = False):
         player_detections = []
-
-        if read_from_stub and stub_path is not None:
-            with open(stub_path, 'rb') as f:
-                player_detections = pickle.load(f)
-            return player_detections
 
         for frame in frames:
             player_dict = self.detect_frame(frame, yolo_verbosity)
             player_detections.append(player_dict)
-        
-        if stub_path is not None:
-            with open(stub_path, 'wb') as f:
-                pickle.dump(player_detections, f)
         
         return player_detections
 
