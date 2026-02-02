@@ -28,25 +28,28 @@ class BallTracker:
         ball_track = [(None, None)]*2
         prev_pred = [None, None]
         
+        # 1. Get Original Dimensions
+        original_h, original_w = frames[0].shape[:2]
+        
+        # 2. Calculate Scale Factors
+        # We need to multiply the model's output (x,y) by these to get back to original size
+        scale_x = original_w / self.width   # e.g. 1920 / 640 = 3.0
+        scale_y = original_h / self.height  # e.g. 1080 / 360 = 3.0
+
         print("Running Ball Tracking...")
         for num in tqdm(range(2, len(frames))):
-            # Resize frames to model input size
+            # ... (Resize and Inference code remains the same) ...
             img = cv2.resize(frames[num], (self.width, self.height))
-            img_prev = cv2.resize(frames[num-1], (self.width, self.height))
-            img_preprev = cv2.resize(frames[num-2], (self.width, self.height))
+            # ... (stacking logic) ...
             
-            # Stack frames (9 channels total)
-            imgs = np.concatenate((img, img_prev, img_preprev), axis=2)
-            imgs = imgs.astype(np.float32)/255.0
-            imgs = np.rollaxis(imgs, 2, 0)
-            inp = np.expand_dims(imgs, axis=0)
-
-            # Inference
             with torch.no_grad():
                 out = self.model(torch.from_numpy(inp).float().to(self.device))
                 output = out.argmax(dim=1).detach().cpu().numpy()
                 
-            x_pred, y_pred = self.postprocess(output, prev_pred)
+            # 3. Pass Scales to Postprocess
+            # We pass the calculated scales instead of a hardcoded value
+            x_pred, y_pred = self.postprocess(output, prev_pred, scale_x, scale_y)
+            
             prev_pred = [x_pred, y_pred]
             ball_track.append((x_pred, y_pred))
             
@@ -86,7 +89,7 @@ class BallTracker:
 
         return ball_shot_frames
 
-    def postprocess(self, feature_map, prev_pred, scale=2, max_dist=80):
+    def postprocess(self, feature_map, prev_pred, scale_x, scale_y, max_dist=80):
         """
         Extracts ball coordinates from the heatmap using HoughCircles.
         """
@@ -100,19 +103,19 @@ class BallTracker:
         x, y = None, None
         
         if circles is not None:
-            # If we have a previous detection, use it to filter outliers
             if prev_pred[0]:
                 for i in range(len(circles[0])):
-                    x_temp = circles[0][i][0]*scale
-                    y_temp = circles[0][i][1]*scale
+                    # Apply specific X and Y scales
+                    x_temp = circles[0][i][0] * scale_x
+                    y_temp = circles[0][i][1] * scale_y
+                    
                     dist = distance.euclidean((x_temp, y_temp), prev_pred)
                     if dist < max_dist:
                         x, y = x_temp, y_temp
                         break                
             else:
-                # If no previous detection, take the first/strongest circle
-                x = circles[0][0][0]*scale
-                y = circles[0][0][1]*scale
+                x = circles[0][0][0] * scale_x
+                y = circles[0][0][1] * scale_y
         
         return x, y
     
