@@ -16,11 +16,130 @@ THETIS_CLASSES = [
     "flat_service",
     "kick_service",
     "slice_service",
+
     "smash"
 ]
 
+# COCO Keypoints Indices
+KP_NOSE = 0
+KP_L_EYE = 1
+KP_R_EYE = 2
+KP_L_EAR = 3
+KP_R_EAR = 4
+KP_L_SHOULDER = 5
+KP_R_SHOULDER = 6
+KP_L_ELBOW = 7
+KP_R_ELBOW = 8
+KP_L_WRIST = 9
+KP_R_WRIST = 10
+KP_L_HIP = 11
+KP_R_HIP = 12
+KP_L_KNEE = 13
+KP_R_KNEE = 14
+KP_L_ANKLE = 15
+KP_R_ANKLE = 16
+
 # Mapping from class name to label index
 LABEL_MAP = {cls_name: i for i, cls_name in enumerate(THETIS_CLASSES)}
+
+def normalize_skeleton(data):
+    """
+    Robust 3D/2D Normalization for View-Invariant recognition.
+    Crucial for ATP/Broadcast footage.
+    
+    Operations:
+    1. Centering: Hip Center -> (0,0,0)
+    2. Rotation Alignment (Canonic View): Rotates skeleton so hips align with X-axis.
+    3. Scaling: Torso length -> 1.0
+    
+    Args:
+        data: (C, T, V) or (T, V, C) numpy array. Assumed (C, T, V) based on project.
+    """
+    # Ensure format (C, T, V)
+    if data.shape[0] not in [2, 3, 4] and data.shape[2] in [2, 3, 4]:
+         data = data.transpose(2, 0, 1) # Convert to C, T, V
+         
+    C, T, V = data.shape
+    data_norm = data.copy()
+    
+    # 1. Centering (Subtract Hip Center)
+    # Hip center = (Left Hip + Right Hip) / 2
+    hip_center = (data[:2, :, KP_L_HIP] + data[:2, :, KP_R_HIP]) / 2.0  # (2, T)
+    hip_center = np.expand_dims(hip_center, axis=-1) # (2, T, 1)
+    
+    data_norm[:2, :, :] = data[:2, :, :] - hip_center
+    
+    if C >= 3: # If 3D (X, Y, Z)
+        z_center = (data[2, :, KP_L_HIP] + data[2, :, KP_R_HIP]) / 2.0
+        z_center = np.expand_dims(z_center, axis=-1)
+        data_norm[2, :, :] = data[2, :, :] - z_center
+
+    # 2. View Alignment (Rotation to Canonical Frontal View)
+    # Only possible if we have 3D Depth (Z) or approximate it
+    if C >= 3: 
+        # Vector between hips
+        left_hip = data_norm[:3, :, KP_L_HIP]
+        right_hip = data_norm[:3, :, KP_R_HIP]
+        hip_vec = left_hip - right_hip # (3, T)
+        
+        # We want hip_vec to align with X-axis (1, 0, 0)
+        # Calculate angle in XZ plane to rotate around Y-axis
+        # atan2(z, x)
+        angles = np.arctan2(hip_vec[2, :], hip_vec[0, :]) # (T,)
+        
+        # Create rotation matrices for each frame to cancel out the angle
+        # Rotate by -angle to align with X-axis
+        cos_a = np.cos(-angles)
+        sin_a = np.sin(-angles)
+        
+        # R_y matrix:
+        # [ cos  0  sin]
+        # [  0   1   0 ]
+        # [-sin  0  cos]
+        
+        # Simple application per frame
+        x_new = data_norm[0] * cos_a[:, np.newaxis] + data_norm[2] * sin_a[:, np.newaxis]
+        z_new = -data_norm[0] * sin_a[:, np.newaxis] + data_norm[2] * cos_a[:, np.newaxis]
+        
+        data_norm[0] = x_new
+        data_norm[2] = z_new
+
+    # 3. Scaling (Torso Size Invariance)
+    # Torso length = Distance between Hip Center and Shoulder Center
+    shoulder_center = (data_norm[:2, :, KP_L_SHOULDER] + data_norm[:2, :, KP_R_SHOULDER]) / 2.0
+    # Hip center is 0,0 now (in XY)
+    
+    torso_len = np.linalg.norm(shoulder_center, axis=0) # (T,)
+    mean_torso = np.mean(torso_len) + 1e-6 # Avoid div by zero
+    
+    data_norm[:3, :, :] /= mean_torso
+    
+    return data_norm.astype(np.float32)
+
+
+def augment_3d_view_rotation(data, angle_range=30):
+    """
+    Simulates camera moving around the player (Y-axis rotation).
+    Requires 3D data (C >= 3).
+    """
+    C, T, V = data.shape
+    if C < 3: return data # Cannot do 3D rotation without Z
+    
+    angle = np.radians(np.random.uniform(-angle_range, angle_range))
+    c, s = np.cos(angle), np.sin(angle)
+    
+    # Rotation around Y-axis
+    # x' = x*cos + z*sin
+    # z' = -x*sin + z*cos
+    
+    x = data[0].copy()
+    z = data[2].copy()
+    
+    data[0] = x * c + z * s
+    data[2] = -x * s + z * c
+    
+    return data
+
 
 def _normalize_string(s):
     return s.lower().replace(" ", "").replace("_", "").replace("-", "")
@@ -77,6 +196,18 @@ COCO_SWAP_PAIRS = [(1, 2), (3, 4), (5, 6), (7, 8), (9, 10), (11, 12), (13, 14), 
 # COCO Keypoint indices for body parts (for local zoom)
 COCO_UPPER_BODY = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  # head, shoulders, arms
 COCO_LOWER_BODY = [11, 12, 13, 14, 15, 16]  # hips, legs
+
+# Pairs (child, parent) to define bones for COCO-17
+# Root is assumed to be 12 (Right Hip) for the tree structure
+COCO_BONE_PAIRS = [
+    (1, 0), (2, 0), (3, 1), (4, 2),     # Face -> Nose
+    (0, 5),                             # Nose -> L.Shoulder
+    (5, 11), (7, 5), (9, 7),            # L.Arm/Torso -> L.Hip
+    (11, 12),                           # L.Hip -> R.Hip (Root)
+    (13, 11), (15, 13),                 # L.Leg -> L.Hip
+    (6, 12), (8, 6), (10, 8),           # R.Arm/Torso -> R.Hip
+    (14, 12), (16, 14)                  # R.Leg -> R.Hip
+]
 
 
 def temporal_crop(data, crop_ratio=0.8):
@@ -274,6 +405,26 @@ def confidence_masking(data, mask_prob=0.1):
     return data.astype(np.float32)
 
 
+def confidence_jittering(data, low=0.3, high=0.7, prob=0.2):
+    """
+    Simula un tracking incerto riducendo casualmente la confidence 
+    di alcuni giunti a valori medi.
+    """
+    C, T, V = data.shape
+    if C < 3: return data
+    
+    # Crea una maschera per decidere quali giunti "sporcare"
+    mask = np.random.random((T, V)) < prob
+    
+    # Genera valori di confidence casuali (es. tra 0.3 e 0.7)
+    noise = np.random.uniform(low, high, (T, V))
+    
+    # Applica i valori rumorosi solo dove indicato dalla maschera
+    data[2, mask] = noise[mask]
+    
+    return data.astype(np.float32)
+
+
 def keypoint_dropout(data, dropout_prob=0.05):
     """
     Set random keypoints to zero (simulate missing detections).
@@ -402,7 +553,8 @@ def augment_skeleton(data,
                      apply_confidence_mask=True,
                      apply_keypoint_dropout=True,
                      apply_pose_rotation=True,
-                     apply_local_zoom=True):
+                     apply_local_zoom=True,
+                     apply_confidence_jitter=True):
     """
     Comprehensive skeleton augmentation pipeline.
     
@@ -418,6 +570,10 @@ def augment_skeleton(data,
     
     if C < 2:
         return data
+
+    # 3D View Augmentation (Simulate Camera Angle) - Requires Z coordinate
+    if C >= 3 and apply_pose_rotation and np.random.random() < 0.5:
+        data = augment_3d_view_rotation(data, angle_range=rotation_range)
     
     # Temporal augmentations (should be applied first)
     if apply_temporal_crop and np.random.random() < 0.3:
@@ -479,6 +635,9 @@ def augment_skeleton(data,
     # Confidence-based augmentations
     if apply_confidence_mask and np.random.random() < 0.3:
         data = confidence_masking(data)
+
+    if apply_confidence_jitter and np.random.random() < 0.3:
+        data = confidence_jittering(data)
     
     if apply_keypoint_dropout and np.random.random() < 0.2:
         data = keypoint_dropout(data)
@@ -510,13 +669,13 @@ class CurriculumLearningScheduler:
             },
             'medium': {
                 'flip_prob': 0.5,
-                'rotation_range': 20,
+                'rotation_range': 45,       # Increased from 20 for 3D robustness
                 'scale_range': 0.1,
                 'noise_std': 0.005,
             },
             'strong': {
                 'flip_prob': 0.7,
-                'rotation_range': 35,
+                'rotation_range': 90,       # Increased from 35. 3D normalization handles this.
                 'scale_range': 0.2,
                 'noise_std': 0.01,
             }
@@ -582,24 +741,19 @@ class CurriculumLearningScheduler:
 
 
 class TennisDataset(Dataset):
-    def __init__(self, X, y, augment=False, augmentation_probs=None):
+    def __init__(self, X, y, augment=False, augmentation_probs=None, data_type='joint'):
         """
         Args:
             X: numpy array (N, T, V, C) from prepare_data.py
             y: numpy array (N,) labels
             augment: bool, if True applies random transformations
             augmentation_probs: dict with probabilities for each augmentation type
-                Example: {
-                    'flip_prob': 0.5,
-                    'rotation_range': 10,
-                    'apply_temporal_crop': True,
-                    'apply_bone_scaling': True,
-                    ...
-                }
+            data_type: 'joint' or 'bone'. If 'bone', converts joints to vectors.
         """
         self.X = torch.FloatTensor(X).permute(0, 3, 1, 2) 
         self.y = torch.LongTensor(y)
         self.augment = augment
+        self.data_type = data_type
         
         # Default augmentation probabilities
         self.aug_probs = {
@@ -617,6 +771,7 @@ class TennisDataset(Dataset):
             'apply_keypoint_dropout': True,
             'apply_pose_rotation': True,
             'apply_local_zoom': True,
+            'apply_confidence_jitter': True,
         }
         
         # Update with user-provided probabilities
@@ -630,9 +785,25 @@ class TennisDataset(Dataset):
         sample = self.X[idx].clone().numpy() 
         label = self.y[idx]
         
+
         if self.augment:
             sample = augment_skeleton(sample, **self.aug_probs)
-            
+        
+        # Always normalize geometry for robust classification
+        # (Enable this if using the new pipeline)
+        sample = normalize_skeleton(sample)
+
+        if self.data_type == 'bone':
+            bone_sample = np.zeros_like(sample)
+            for child, parent in COCO_BONE_PAIRS:
+                # Vector = Child - Parent (for X, Y usually channels 0, 1)
+                bone_sample[:2, :, child] = sample[:2, :, child] - sample[:2, :, parent]
+                
+                # If there is a confidence channel (3rd channel), keep the child's confidence
+                if sample.shape[0] > 2:
+                     bone_sample[2:, :, child] = sample[2:, :, child]
+            sample = bone_sample
+
         return torch.FloatTensor(sample), label
     
     def disable_augmentation(self, aug_names):

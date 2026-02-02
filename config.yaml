@@ -8,6 +8,8 @@ data:
 # Model configuration
 model:
   yolo_path: 'models/yolo26x-pose.pt'
+  use_motionbert: true      # Enable MotionBERT lifting
+  motionbert_path: 'models/MB_ft_h36m.pth' # Path to MotionBERT checkpoint (Download: https://1drv.ms/f/s!AvAdh0LSjEOlgSoTqtyR5Zsgi8_Z?e=rn4VJf)
 
 # Hyperparameters
 hyperparameters:
@@ -27,6 +29,7 @@ training:
   early_stopping_patience: 10  # Stop if no improvement for N epochs
   checkpoint_frequency: 5       # Save checkpoint every N epochs
   monitor_metric: 'f1'          # Metric to monitor: 'f1' or 'loss'
+  modality: 'joint'             # 'joint' or 'bone'
   
   # Curriculum Learning
   use_curriculum_learning: true  # Enable/disable curriculum learning for augmentation
@@ -37,8 +40,10 @@ training:
   
 # Model hyperparameters
 model_hyperparameters:
+  type: 'HDGCN'             # 'HDGCN' or 'CTRGCN'
   dropout: 0.5
-  in_channels: 3
+  in_channels: 4            # Input channels (4 for X,Y,Z,Conf)
+
   
 # Output paths
 output:

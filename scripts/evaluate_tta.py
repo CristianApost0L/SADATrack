@@ -95,8 +95,17 @@ def main(config_path):
     output_config = config['output']
     evaluation_config = config['evaluation']
     model_config = config['model_hyperparameters']
-    
+    training_config = config.get('training', {})
+    MODALITY = training_config.get('modality', 'joint')
+
     DATA_PROCESSED_DIR = data_config['processed_dir']
+    
+    # Check for locally processed data (priority over config)
+    local_processed_dir = os.path.join(os.getcwd(), 'data', 'processed')
+    if os.path.exists(local_processed_dir) and os.path.exists(os.path.join(local_processed_dir, 'X.npy')):
+        print(f"[INFO] Found locally processed data in {local_processed_dir}. Using this instead of config path.")
+        DATA_PROCESSED_DIR = local_processed_dir
+
     MODEL_SAVE_PATH = output_config['model_save_path']
     EVALUATION_DIR = output_config['evaluation_dir']
     BATCH_SIZE = evaluation_config['batch_size']
@@ -140,11 +149,23 @@ def main(config_path):
     print(f"Test set: {len(X_test)} samples\n")
     
     # 3. Create test dataset and dataloader
-    test_dataset = TennisDataset(X_test, y_test, augment=False)
+    test_dataset = TennisDataset(X_test, y_test, augment=False, data_type=MODALITY)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
     
-    # 4. Load model
-    model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=0.5)
+    # 4. Load config to determine model type
+    model_config = config.get('model_hyperparameters', {})
+    model_type = model_config.get('type', 'HDGCN')
+    print(f"Initializing model type: {model_type}")
+
+    # Load model architecture
+    from src.model import HDGCN_Tennis, CTRGCN_Tennis  # Ensure both are imported
+
+    if model_type == 'HDGCN':
+        model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=0.5)
+    elif model_type == 'CTRGCN':
+        model = CTRGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=0.5)
+    else:
+        raise ValueError(f"Unknown model type in config: {model_type}")
     
     if not os.path.exists(MODEL_SAVE_PATH):
         print(f"ERROR: Model not found at {MODEL_SAVE_PATH}")

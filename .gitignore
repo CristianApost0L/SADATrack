@@ -67,3 +67,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.log
+
+# External repositories
+CTR-GCN-main/
+HD-GCN-main/
+MotionBERT-main/

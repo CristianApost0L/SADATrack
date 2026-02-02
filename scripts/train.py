@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.dataset import TennisDataset, CurriculumLearningScheduler
-from src.model import HDGCN_Tennis
+from src.model import HDGCN_Tennis, CTRGCN_Tennis
 
 def load_config(config_path):
     """Load YAML configuration file"""
@@ -98,6 +98,7 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
     NUM_WORKERS = training_config['num_workers']
     EARLY_STOPPING_PATIENCE = training_config.get('early_stopping_patience', 10)
     CHECKPOINT_FREQUENCY = training_config.get('checkpoint_frequency', 5)
+    MODALITY = training_config.get('modality', 'joint')
     
     # Curriculum learning settings
     USE_CURRICULUM = training_config.get('use_curriculum_learning', False)
@@ -110,7 +111,12 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
     if fold_idx is not None:
         fold_base = output_config.get('folds_output_dir', 'runs/kfold_results')
         model_name, ext = os.path.splitext(output_config['model_save_path'])
-        MODEL_SAVE_PATH = os.path.join(fold_base, f'fold_{fold_idx}', f'best_model_hdgcn{ext}')
+        
+        # Use model type in filename if available
+        current_model_type = model_config.get('type', 'HDGCN')
+        filename = f'best_model_{current_model_type.lower()}{ext}'
+        
+        MODEL_SAVE_PATH = os.path.join(fold_base, f'fold_{fold_idx}', filename)
         PLOTS_OUTPUT_DIR = os.path.join(fold_base, f'fold_{fold_idx}', 'plots')
         CHECKPOINTS_DIR = os.path.join(fold_base, f'fold_{fold_idx}', 'checkpoints')
         print(f"\n{'='*20} Starting Fold {fold_idx} {'='*20}")
@@ -128,8 +134,8 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
         print(f"  Class {idx}: {weight:.4f}")
     
     # Create datasets and dataloaders
-    train_dataset = TennisDataset(X_train, y_train, augment=True)
-    val_dataset = TennisDataset(X_val, y_val, augment=False)
+    train_dataset = TennisDataset(X_train, y_train, augment=True, data_type=MODALITY)
+    val_dataset = TennisDataset(X_val, y_val, augment=False, data_type=MODALITY)
     
     # Initialize curriculum learning scheduler if enabled
     curriculum_scheduler = None
@@ -147,7 +153,16 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
     
     # Initialize model
-    model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT)
+    model_type = model_config.get('type', 'HDGCN')
+    print(f"\n[INFO] Initializing model: {model_type}")
+    
+    if model_type == 'HDGCN':
+        model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT)
+    elif model_type == 'CTRGCN':
+        model = CTRGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT)
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+
     model = model.to(device)
     
     # Loss and optimizer
@@ -329,6 +344,15 @@ def train(config_path, k_folds=None):
     torch.backends.cudnn.benchmark = False
     
     print(f"Training started on: {DEVICE}")
+    
+    # PATCH: Prioritize local processed data in Kaggle/Read-only environments
+    # Check if a local writable version exists and prefer it over the config path
+    # This handles the case where config points to /kaggle/input (read-only) but we generated new data
+    local_processed_dir = os.path.join(os.getcwd(), 'data', 'processed')
+    if os.path.exists(os.path.join(local_processed_dir, 'X.npy')):
+        print(f"[INFO] Found locally processed data in {local_processed_dir}. Using this instead of config path.")
+        DATA_PROCESSED_DIR = local_processed_dir
+        
     X_path = os.path.join(DATA_PROCESSED_DIR, 'X.npy')
     y_path = os.path.join(DATA_PROCESSED_DIR, 'y.npy')
     label_map_path = os.path.join(DATA_PROCESSED_DIR, 'label_map.npy')

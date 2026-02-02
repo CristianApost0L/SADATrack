@@ -23,6 +23,13 @@ def analyze_dataset(config_path):
     output_config = config['output']
     
     DATA_PROCESSED_DIR = data_config['processed_dir']
+
+    # Check for locally processed data (priority over config)
+    local_processed_dir = os.path.join(os.getcwd(), 'data', 'processed')
+    if os.path.exists(local_processed_dir) and os.path.exists(os.path.join(local_processed_dir, 'X.npy')):
+        print(f"[INFO] Found locally processed data in {local_processed_dir}. Using this instead of config path.")
+        DATA_PROCESSED_DIR = local_processed_dir
+    
     ANALYSIS_OUTPUT_DIR = output_config.get('analysis_output_dir', 'runs/analysis')
     
     # Load data
