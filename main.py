@@ -129,7 +129,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
                 current_group.append(frame)
             else:
                 # Group finished -> Pick the Best Frame in this group
-                best_frame = min(current_group, key=get_proximity_score)
+                best_frame = min(current_group, key=lambda x: get_proximity_score(ball_detections, player_detections, x))                
                 ball_shot_frames.append(best_frame)
                 
                 # Start new group
@@ -137,7 +137,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
         
         # Process the final group
         if current_group:
-            best_frame = min(current_group, key=get_proximity_score)
+            best_frame = min(current_group, key=lambda x: get_proximity_score(ball_detections, player_detections, x))
             ball_shot_frames.append(best_frame)
 
     print(f"Refined Shots: {len(ball_shot_frames)} (Filtered noise by Proximity)")
