@@ -8,8 +8,7 @@ from utils import (read_video,
                    smooth_keypoints,
                    print_validation_report,
                    filter_adjacent_frames,
-                   get_proximity_score,
-                   split_video_into_clips
+                   get_proximity_score
                    )
 import constants
 from trackers import PlayerTracker, BallTracker, BounceDetector 
@@ -28,98 +27,133 @@ import time
 import json
 from ultralytics import YOLO 
 
-def process_video_sequence(input_video_path, frame_offset, HDGCN_window_size, yolo_verbosity, player_detection_court_margin):
-    """
-    Processes a single video file (a full video or a clip).
-    Returns the prediction log for this sequence and the number of frames processed.
-    """
-    print(f"Processing sequence: {input_video_path} (Offset: {frame_offset})")
-    
+
+def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_margin):
+    start_time = time.time()
+
+    # LOAD GROUND TRUTH FROM JSON
+    ground_truth_path = input_video.rsplit(".", 1)[0] + ".json"
+
+    gold_standard_data = []
+    if ground_truth_path and os.path.exists(ground_truth_path):
+        print(f"Loading Ground Truth labels from: {ground_truth_path}")
+        with open(ground_truth_path, 'r') as f:
+            gold_standard_data = json.load(f)
+    elif ground_truth_path:
+        print(f"Warning: Ground Truth file not found at {ground_truth_path}")
+
     model_predictions_log = []
 
     # Read Video
+    input_video_path = input_video
+
+    # Initialize Action Classifier
+    extractor = PoseExtractor()
+
+    action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
+    action_model.load_state_dict(torch.load('/kaggle/input/cv-project/new_Swing_classifier.pth'))
+    action_model.eval()
+    
     # --- DUAL STREAM SETUP ---
     # Stream A: Raw Frames (Clean, low noise) -> BEST FOR BALL DETECTION
     raw_frames = read_video(input_video_path)
     
-    if len(raw_frames) == 0:
-        return [], 0
-
     # Stream B: Enhanced Frames (High contrast) -> BEST FOR PLAYER/COURT DETECTION
     print("Preprocessing video for lighting/shadows...")
     enhanced_frames = enhance_video_contrast(raw_frames)
 
-    # Initialize Action Classifier
-    extractor = PoseExtractor()
-    action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
-    action_model.load_state_dict(torch.load('/kaggle/input/cv-project/new_Swing_classifier.pth'))
-    action_model.eval()
 
     # Initialize Trackers
     player_tracker = PlayerTracker(model_path='/kaggle/input/cv-project/yolo26x.pt')
-    ball_tracker = BallTracker(model_path='/kaggle/input/cv-project/ball_model_best.pt') 
-    bounce_detector = BounceDetector(model_path='/kaggle/input/cv-project/ctb_regr_bounce.cbm')
+    
+    ball_tracker = BallTracker(model_path='/kaggle/input/cv-project/ball_model_best.pt') # Amin model
+
+    bounce_detector = BounceDetector(model_path='/kaggle/input/cv-project/ctb_regr_bounce.cbm') # Amin model
 
     # --- 2. DETECT PLAYERS (Use ENHANCED frames) ---
     print("Detecting Players on Enhanced Video...")
-    player_detections = player_tracker.detect_frames(enhanced_frames, yolo_verbosity=yolo_verbosity)
+    player_detections = player_tracker.detect_frames(enhanced_frames,
+                                                     yolo_verbosity=yolo_verbosity
+                                                     )
     
-    # FREE MEMORY
+    # FREE MEMORY: We are done with YOLO. Unload it to make room for TrackNet.
     print("Unloading Player Tracker model to free VRAM...")
     del player_tracker.model 
     torch.cuda.empty_cache()
 
     # --- 3. DETECT BALL (Use RAW frames) ---
+    # This ignores the noisy/grainy enhanced frames and looks at the clean original
     print("Detecting Ball on Raw Video...")
     ball_detections = ball_tracker.detect_frames(raw_frames)
     
-    # Interpolate ball
+    # Interpolate ball (standard step)
     ball_detections = ball_tracker.interpolate_ball_positions(ball_detections)
     
-    # Get candidates (Hits + Bounces)
+    # 1. Get ALL candidates (Hits + Bounces) using geometric heuristic
     candidate_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
+    
+    # Merge frames like [141, 145, 147] into just [141]
+    # 24 frames = 1 second buffer (physically impossible to hit 2 shots in 1 sec)
     candidate_shot_frames = filter_adjacent_frames(candidate_shot_frames, min_distance=24)
 
-    # Detect Bounces
+    # 2. Detect Bounces using the new Model
+    detected_bounces = []
+    # Pass the list of (x,y) tuples directly
     detected_bounces = bounce_detector.predict(ball_detections) 
 
-    # Filter: Keep a candidate ONLY if it is NOT a bounce
+    # 3. Filter: Keep a candidate ONLY if it is NOT a bounce
     clean_candidates = []
     for frame in candidate_shot_frames:
+        # Check if this frame is close to any detected bounce (within margin of error, e.g., 3 frames)
         is_bounce = False
         for b_frame in detected_bounces:
             if abs(frame - b_frame) <= 3: 
                 is_bounce = True
                 break
+        
+        # If it's not a bounce, it's a hit!
         if not is_bounce:
             clean_candidates.append(frame)
 
     # SMART FILTERING: Group frames and pick the one CLOSEST to a player
+    # Instead of just taking the first frame (filter_adjacent_frames), we verify proximity.
+    
     ball_shot_frames = []
+    
     if clean_candidates:
         clean_candidates.sort()
         current_group = [clean_candidates[0]]
+        
+        # Iterate and group
         for i in range(1, len(clean_candidates)):
             frame = clean_candidates[i]
             prev_frame = current_group[-1]
+            
+            # If frames are close (within 24 frames / 1 sec), they belong to the same "Shot Event"
             if frame - prev_frame <= 24:
                 current_group.append(frame)
             else:
+                # Group finished -> Pick the Best Frame in this group
                 best_frame = min(current_group, key=lambda x: get_proximity_score(ball_detections, player_detections, x))                
                 ball_shot_frames.append(best_frame)
+                
+                # Start new group
                 current_group = [frame]
+        
+        # Process the final group
         if current_group:
             best_frame = min(current_group, key=lambda x: get_proximity_score(ball_detections, player_detections, x))
             ball_shot_frames.append(best_frame)
 
-    print(f"Refined Shots: {len(ball_shot_frames)}")
+    print(f"Refined Shots: {len(ball_shot_frames)} (Filtered noise by Proximity)")
     
-    # FREE MEMORY
+    # FREE MEMORY: We are done with TrackNet. Unload it.
     print("Unloading Ball Tracker model to free VRAM...")
     del ball_tracker.model
     torch.cuda.empty_cache()
 
-    # --- 4. COURT DETECTION ---
+    # --- 4. COURT DETECTION (Use ENHANCED frames) ---
+    # Lines are often faint, so contrast enhancement helps here too
     court_model_path = "/kaggle/input/cv-project/keypoints_model.pth"
     court_line_detector = CourtLineDetector(court_model_path)
     
@@ -132,18 +166,24 @@ def process_video_sequence(input_video_path, frame_offset, HDGCN_window_size, yo
     for i, frame in enumerate(enhanced_frames):
         if i % court_infer_interval == 0:
             last_keypoints = court_line_detector.predict(frame)
+        
+        # Safety check: if first frame fails, handle it (though unlikely)
         if last_keypoints is None:
+            # Fallback to zeros or handle error if needed
             last_keypoints = [0] * 28 
+            
         court_keypoints.append(last_keypoints)
 
     # Choose players
     player_detections = player_tracker.choose_and_filter_players(court_keypoints[0], player_detections, player_detection_court_margin = player_detection_court_margin)
 
     pose_estimator = YOLO('/kaggle/input/cv-project/yolo26x-pose.pt')
+
     print("Running Pose Estimation on detected players (BATCHED)...")
     
+    # 1. Collect all crops from the entire video first
     all_crops = []
-    crop_metadata = [] 
+    crop_metadata = [] # Stores (frame_idx, track_id, crop_x1, crop_y1) to map back later
     
     for frame_idx, frame_dict in enumerate(player_detections):
         frame_img = enhanced_frames[frame_idx]
@@ -152,51 +192,77 @@ def process_video_sequence(input_video_path, frame_offset, HDGCN_window_size, yo
         for track_id, data in frame_dict.items():
             bbox = data['bbox']
             padding = constants.BOUNDING_BOX_PADDING
+            
             x1, y1, x2, y2 = map(int, bbox)
             x1 = max(0, x1 - padding)
             y1 = max(0, y1 - padding)
             x2 = min(img_w, x2 + padding)
             y2 = min(img_h, y2 + padding)
             
+            # Skip invalid boxes
             if x2 <= x1 or y2 <= y1:
                 frame_dict[track_id]['keypoints'] = []
                 continue
 
+            # Crop and Store
             player_crop = frame_img[y1:y2, x1:x2]
             all_crops.append(player_crop)
             crop_metadata.append((frame_idx, track_id, x1, y1))
 
+    # 2. Run Inference in Batches (Much Faster)
+    # We process 24 crops at a time to saturate the GPU without running out of memory
     BATCH_SIZE = constants.BATCH_SIZE
     all_pose_results = []
     
+    # Process using a progress bar if you want, or just a range loop
     for i in range(0, len(all_crops), BATCH_SIZE):
         batch_crops = all_crops[i : i + BATCH_SIZE]
+        
+        # verbose=False prevents it from printing 1000s of lines
+        # stream=False ensures we get a list of results back immediately
         batch_results = pose_estimator(batch_crops, verbose=False, stream=False)
         all_pose_results.extend(batch_results)
 
+    # 3. Map Results Back to Player Detections
     for i, result in enumerate(all_pose_results):
         frame_idx, track_id, crop_x1, crop_y1 = crop_metadata[i]
+        
         found_keypoints = False
         if result.keypoints is not None and len(result.keypoints.data) > 0:
+            # Extract keypoints (17, 3)
             kpts = result.keypoints.data[0].cpu().numpy()
+            
+            # Add the crop offset to map back to original frame coordinates
             kpts[:, 0] += crop_x1
             kpts[:, 1] += crop_y1
+            
             player_detections[frame_idx][track_id]['keypoints'] = kpts.tolist()
             found_keypoints = True
         
         if not found_keypoints:
             player_detections[frame_idx][track_id]['keypoints'] = []
 
+    # KEYPOINT SMOOTHING 
+    # Doing it here updates 'player_detections' IN PLACE.
+    # Both the HDGCN model AND the Drawing loop will see stable skeletons.
     print("Smoothing skeleton keypoints...")
     player_detections = smooth_keypoints(player_detections)
 
-    # --- DYNAMIC ID MAPPING ---
+    # --- DYNAMIC ID MAPPING (IMPROVED) ---
+    # Goal: Robustly identify Player 1 (Closest/Bottom) and Player 2 (Farthest/Top)
+    
+    # 1. Filter Noise: Find the two most frequent Track IDs
     id_occupancy = {}
     for frame_dict in player_detections:
         for track_id in frame_dict.keys():
             id_occupancy[track_id] = id_occupancy.get(track_id, 0) + 1
             
+    # Select top 2 IDs based on how many frames they appear in
+    # This removes ball boys or line judges who are only detected briefly
     valid_ids = sorted(id_occupancy, key=id_occupancy.get, reverse=True)[:2]
+    
+    # 2. Assign IDs based on "Size" (Bounding Box Height)
+    # The closer player (Player 1) will have a larger bounding box height.
     id_avg_height = {}
     
     for pid in valid_ids:
@@ -204,21 +270,31 @@ def process_video_sequence(input_video_path, frame_offset, HDGCN_window_size, yo
         for frame_dict in player_detections:
             if pid in frame_dict:
                 bbox = frame_dict[pid]['bbox']
+                # Calculate height: y2 - y1
                 h = bbox[3] - bbox[1]
                 heights.append(h)
+        
+        # Calculate average height for this player ID
         if heights:
             id_avg_height[pid] = sum(heights) / len(heights)
         else:
             id_avg_height[pid] = 0
 
+    # Sort IDs by Height: Largest (Closest) -> Smallest (Farthest)
     sorted_ids = sorted(valid_ids, key=lambda x: id_avg_height.get(x, 0), reverse=True)
     
     player_id_map = {} 
+    # Assign Player 1 to the largest ID
     if len(sorted_ids) >= 1: 
         player_id_map[sorted_ids[0]] = 1
+        print(f"Identified Player 1 (Closest): Track ID {sorted_ids[0]} (Avg Height: {id_avg_height[sorted_ids[0]]:.1f}px)")
+        
+    # Assign Player 2 to the smaller ID
     if len(sorted_ids) >= 2: 
         player_id_map[sorted_ids[1]] = 2
+        print(f"Identified Player 2 (Farthest): Track ID {sorted_ids[1]} (Avg Height: {id_avg_height[sorted_ids[1]]:.1f}px)")
     
+    # Fallback: Map any other stray IDs to Player 1 to prevent crashes
     all_detected_ids = set(id_occupancy.keys())
     for pid in all_detected_ids:
         if pid not in player_id_map:
@@ -227,17 +303,28 @@ def process_video_sequence(input_video_path, frame_offset, HDGCN_window_size, yo
     # MiniCourt
     mini_court = MiniCourt(raw_frames[0]) 
 
+    # Detect ball shots
+    ball_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
+
+    # --- FIX: CONVERT POINTS TO BOXES ---
+    # MiniCourt and Draw functions expect Bounding Boxes [x1, y1, x2, y2],
+    # but our new Tracker returns Center Points (x, y).
+    # We create a fake 20x20 box around the center.
     ball_detections_boxes = []
     for pos in ball_detections:
         if pos is None or pos[0] is None or np.isnan(pos[0]):
+            # Use an empty box inside a dictionary
             ball_detections_boxes.append({1: [0, 0, 0, 0]}) 
         else:
             x, y = pos
             pad = 10 
+            # WRAP IN DICT: {1: [x1, y1, x2, y2]}
             ball_detections_boxes.append({1: [x-pad, y-pad, x+pad, y+pad]})
     
     ball_detections = ball_detections_boxes
+    # ------------------------------------
 
+    # Convert positions to mini court positions
     player_mini_court_detections, ball_mini_court_detections = mini_court.convert_bounding_boxes_to_mini_court_coordinates(
                                                                             player_detections, 
                                                                             ball_detections,
@@ -251,6 +338,7 @@ def process_video_sequence(input_video_path, frame_offset, HDGCN_window_size, yo
         'player_1_last_shot_speed':0,
         'player_1_total_player_speed':0,
         'player_1_last_player_speed':0,
+
         'player_2_number_of_shots':0,
         'player_2_total_shot_speed':0,
         'player_2_last_shot_speed':0,
@@ -263,12 +351,21 @@ def process_video_sequence(input_video_path, frame_offset, HDGCN_window_size, yo
         start_frame = ball_shot_frames[ball_shot_ind]
         
         if ball_shot_ind == len(ball_shot_frames) - 1:
+            # Case: This is the LAST detected shot. 
+            # We don't have a "next hit" to calculate speed, so we set defaults.
             speed_of_ball_shot = 0 
-            ball_shot_time_in_seconds = 1
+            ball_shot_time_in_seconds = 1 # Dummy value to avoid division by zero
+            
+            # We assume the "end" is just a bit later to capture the swing
             end_frame = min(len(enhanced_frames) - 1, start_frame + 20)
+            
+            # We cannot measure ball distance since we don't know where it lands
+            distance_covered_by_ball_meters = 0
         else:
+            # Case: Normal shot (Start -> End)
             end_frame = ball_shot_frames[ball_shot_ind+1]
             ball_shot_time_in_seconds = (end_frame-start_frame)/24
+
             distance_covered_by_ball_pixels = measure_distance(ball_mini_court_detections[start_frame][1],
                                                             ball_mini_court_detections[end_frame][1])
             distance_covered_by_ball_meters = convert_pixel_distance_to_meters( distance_covered_by_ball_pixels,
@@ -277,44 +374,65 @@ def process_video_sequence(input_video_path, frame_offset, HDGCN_window_size, yo
                                                                             ) 
             speed_of_ball_shot = distance_covered_by_ball_meters/ball_shot_time_in_seconds * 3.6
 
+        # player who the ball
         player_positions = player_mini_court_detections[start_frame]
 
+        # Safety check: if no players detected in this frame
         if len(player_positions) == 0:
             continue
 
         player_shot_ball = min( player_positions.keys(), key=lambda player_id: measure_distance(player_positions[player_id],
                                                                                                  ball_mini_court_detections[start_frame][1]))
+
+        # Map to 1 or 2
         mapped_shooter_id = player_id_map.get(player_shot_ball, 1)
 
         current_player_stats = deepcopy(player_stats_data[-1])
         current_player_stats['frame_num'] = start_frame
 
-        # Action Recognition
+        # 1. Define the Window
+        # The GCN needs a sequence (e.g., 40 frames). Center it on the shot frame.
         window_size = HDGCN_window_size
         half_window = window_size // 2
         start_window = max(0, start_frame - half_window)
         end_window = min(len(enhanced_frames), start_frame + half_window)
 
+        # 2. Extract Keypoints Sequence (CORRECTED)
         sequence_data = []
         for f in range(start_window, end_window):
+            # Check if frame exists and player is detected
             if f < len(player_detections) and player_shot_ball in player_detections[f]:
+                # We need BOTH bbox and keypoints for normalization
                 data_point = {
                     'bbox': player_detections[f][player_shot_ball]['bbox'],
                     'keypoints': player_detections[f][player_shot_ball]['keypoints']
                 }
                 sequence_data.append(data_point)
             else:
+                # Handle missing frames (pad with dummy data)
+                # We use a dummy bbox [0,0,1,1] to avoid division by zero errors
                 sequence_data.append({'bbox': [0,0,1,1], 'keypoints': [[0,0,0]] * 17})
 
+        # 3. Normalize using the class instance
+        # You need to initialize 'extractor = PoseExtractor()' before the loop (see Fix #4)
         normalized_input = extractor.process_sequence(sequence_data)
+        
+        # Convert to tensor (N, C, T, V)
         inp_tensor = torch.from_numpy(normalized_input).unsqueeze(0).float()
-        inp_tensor = inp_tensor.permute(0, 3, 1, 2) 
+        inp_tensor = inp_tensor.permute(0, 3, 1, 2) # (1, 3, 40, 17)
 
+        # 4. Predict
         with torch.no_grad():
             output = action_model(inp_tensor)
             
+            # --- FIX 1: BASELINE VOLLEY HALLUCINATION ---
+            # Logic: If player is far from the net (> 4m), they cannot be hitting a volley.
             player_mc_pos = player_mini_court_detections[start_frame][player_shot_ball]
+            
+            # Calculate Net Y position (Midpoint of the court drawing)
             net_y = (mini_court.court_start_y + mini_court.court_end_y) / 2
+            
+            # Distance from Net
             dist_from_net_pixels = abs(player_mc_pos[1] - net_y)
             dist_from_net_meters = convert_pixel_distance_to_meters(
                 dist_from_net_pixels, 
@@ -322,50 +440,64 @@ def process_video_sequence(input_video_path, frame_offset, HDGCN_window_size, yo
                 mini_court.get_width_of_mini_court()
             )
             
-            if dist_from_net_meters > 4.0: 
+            if dist_from_net_meters > 4.0: # If > 4 meters from net
                  for idx, class_name in enumerate(constants.THETIS_CLASSES):
                      if "volley" in class_name:
                          output[0][idx] = -float('inf')
 
+            # --- FIX 2: SERVICE & SMASH CONFUSION (HEIGHT CHECK) ---
+            # Logic: Serves/Smashes happen ABOVE the head. If ball is below nose, ban them.
+            
+            # Get Nose Y (Keypoint 0)
             shooter_kpts = player_detections[start_frame][player_shot_ball].get('keypoints', [])
             if shooter_kpts and len(shooter_kpts) > 0:
                 nose_y = shooter_kpts[0][1]
+                
+                # Get Ball Y (Center of box)
                 ball_box = ball_detections[start_frame][1]
                 ball_y = (ball_box[1] + ball_box[3]) / 2
+                
+                # Image Coordinates: Y increases downwards.
+                # So if Ball Y > Nose Y, the ball is BELOW the nose.
                 if ball_y > nose_y:
                     for idx, class_name in enumerate(constants.THETIS_CLASSES):
                         if "service" in class_name or "smash" in class_name:
                             output[0][idx] = -float('inf')
 
-            # IMPORTANT: For global frame consistency, we use frame_offset
-            # The 'start_frame' variable is local to this clip.
-            # However, the logic for FRAME_LIMIT_FOR_SERVES might depend on the start of the match.
-            # Assuming 'serves' are only valid at the very start of a rally, this might be tricky with clips.
-            # But we stick to the local clip frame for this specific logic unless we track rally state.
-            if (start_frame + frame_offset) > constants.FRAME_LIMIT_FOR_SERVES:
+            # Ban Serve after FRAME_LIMIT frames
+            if start_frame > constants.FRAME_LIMIT_FOR_SERVES:
+                # If a class name contains "service", kill its probability.
                 for idx, class_name in enumerate(constants.THETIS_CLASSES):
                     if "service" in class_name:
+                        # Set logit to negative infinity so argmax never picks it
                         output[0][idx] = -float('inf')
 
             prediction_idx = torch.argmax(output, dim=1).item()
             shot_name = constants.THETIS_CLASSES[prediction_idx]
 
-        # SAVE TO LOG with GLOBAL OFFSET
+        # SAVE TO LOG
         model_predictions_log.append({
-            "frame": start_frame + frame_offset,
+            "frame": start_frame,
             "shot": shot_name,
             "player": mapped_shooter_id
         })
 
         current_player_stats['shot_type'] = shot_name
+
         current_player_stats['shot_player_id'] = mapped_shooter_id
+
+        print(f"Frame {start_frame}: | Prediction: {shot_name} | Player: {player_shot_ball} (Mapped: {mapped_shooter_id})")
         
+        # D. Opponent Speed (CRITICAL FIX FOR KEYERROR 2)
+        # We find valid opponents present in the CURRENT frame
         current_players = list(player_mini_court_detections[start_frame].keys())
         opponents = [pid for pid in current_players if pid != player_shot_ball]
         
         speed_of_opponent = 0
         if len(opponents) > 0:
-            opponent_player_id = opponents[0] 
+            opponent_player_id = opponents[0] # Use the actual detected opponent ID
+            
+            # Only measure speed if opponent is also in end frame
             if opponent_player_id in player_mini_court_detections[end_frame]:
                 dist_pixels = measure_distance(player_mini_court_detections[start_frame][opponent_player_id],
                                                player_mini_court_detections[end_frame][opponent_player_id])
@@ -373,10 +505,13 @@ def process_video_sequence(input_video_path, frame_offset, HDGCN_window_size, yo
                                                                constants.DOUBLE_LINE_WIDTH,
                                                                mini_court.get_width_of_mini_court()) 
                 speed_of_opponent = dist_meters/ball_shot_time_in_seconds * 3.6
+                
+                # Update stats for mapped opponent ID
                 mapped_opponent_id = player_id_map.get(opponent_player_id, 2 if mapped_shooter_id == 1 else 1)
                 current_player_stats[f'player_{mapped_opponent_id}_total_player_speed'] += speed_of_opponent
                 current_player_stats[f'player_{mapped_opponent_id}_last_player_speed'] = speed_of_opponent
 
+        # Update Shooter Stats
         current_player_stats[f'player_{mapped_shooter_id}_number_of_shots'] += 1
         current_player_stats[f'player_{mapped_shooter_id}_total_shot_speed'] += speed_of_ball_shot
         current_player_stats[f'player_{mapped_shooter_id}_last_shot_speed'] = speed_of_ball_shot
@@ -393,18 +528,27 @@ def process_video_sequence(input_video_path, frame_offset, HDGCN_window_size, yo
     player_stats_data_df['player_1_average_player_speed'] = player_stats_data_df['player_1_total_player_speed']/player_stats_data_df['player_2_number_of_shots']
     player_stats_data_df['player_2_average_player_speed'] = player_stats_data_df['player_2_total_player_speed']/player_stats_data_df['player_1_number_of_shots']
 
+
+
     # Draw output
+    ## Draw Player Bounding Boxes
     output_video_frames = player_tracker.draw_bboxes(raw_frames, player_detections)
     output_video_frames = draw_skeletons(output_video_frames, player_detections)
     output_video_frames = ball_tracker.draw_bboxes(output_video_frames, ball_detections)
+
+    ## Draw court Keypoints
+    # Pass the full list 'court_keypoints'
     output_video_frames  = court_line_detector.draw_keypoints_on_video(output_video_frames, court_keypoints)
+
+    # Draw Mini Court
     output_video_frames = mini_court.draw_mini_court(output_video_frames)
     output_video_frames = mini_court.draw_points_on_mini_court(output_video_frames,player_mini_court_detections)
     output_video_frames = mini_court.draw_points_on_mini_court(output_video_frames,ball_mini_court_detections, color=(0,255,255))    
 
-    # Draw Stats on frames
-    # output_video_frames = draw_player_stats(output_video_frames,player_stats_data_df) # Optional/Commented in original
+    # Draw Player Stats
+    #output_video_frames = draw_player_stats(output_video_frames,player_stats_data_df)
 
+    # Define Minimap dimensions (Fixed width from MiniCourt class)
     minimap_width = mini_court.drawing_rectangle_width
     minimap_start_x = mini_court.start_x
     minimap_end_y = mini_court.end_y
@@ -413,112 +557,78 @@ def process_video_sequence(input_video_path, frame_offset, HDGCN_window_size, yo
         current_stats = player_stats_data_df.iloc[i]
         shot_type = current_stats['shot_type']
         
+        # Check if we have a valid shot type
         if shot_type is not None and str(shot_type) != 'nan':
+            
+            # 1. Format the text: "Forehand Flat" instead of "forehand_flat"
             shot_name = str(shot_type).replace('_', ' ').title()
+            
+            # 2. Add Player ID: "Forehand Flat (P1)"
+            # Use .get() to avoid errors if the column is missing
             shot_player_id = current_stats.get('shot_player_id')
             
             if shot_player_id is not None and str(shot_player_id) != 'nan':
+                # Convert to int (handles 1.0 -> 1)
                 p_id = int(float(shot_player_id))
                 text = f"{shot_name} (P{p_id})"
             else:
                 text = f"{shot_name}"
             
+            # 3. Font Settings (Normalized Size)
             font = cv2.FONT_HERSHEY_SIMPLEX
             thickness = 2
+            
+            # Use a FIXED, larger font scale by default for consistency
             font_scale = 0.65 
             
+            # 4. Safety Check: Only shrink if it physically doesn't fit the box
             (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, thickness)
             
             while text_width > minimap_width and font_scale > 0.4:
                 font_scale -= 0.05
                 (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, thickness)
             
+            # 5. Center Text horizontally relative to Minimap
             text_x = int(minimap_start_x + (minimap_width - text_width) / 2)
-            text_y = int(minimap_end_y + 30 + text_height)
+            text_y = int(minimap_end_y + 30 + text_height) # Padding below minimap
 
+            # 6. Draw (Black Outline + White Text)
             cv2.putText(frame, text, (text_x, text_y), font, font_scale, (0, 0, 0), thickness + 2)
             cv2.putText(frame, text, (text_x, text_y), font, font_scale, (255, 255, 255), thickness)
 
-    ## Draw frame number on top left corner (Include Offset for display?)
-    # For debugging, we can show local or global. Let's show Global frame num.
+    ## Draw frame number on top left corner
     for i, frame in enumerate(output_video_frames):
-        cv2.putText(frame, f"Frame: {i + frame_offset}",(10,30),cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.putText(frame, f"Frame: {i}",(10,30),cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
     if not os.path.exists("output_videos"):
         os.makedirs("output_videos")
 
-    # Generate output name based on input name
-    base_name = os.path.basename(input_video_path)
-    save_path = f"output_videos/output_{base_name}"
-    # Change extension to .avi for compatibility with save_video function which uses MJPG
-    save_path = os.path.splitext(save_path)[0] + ".avi"
-
-    save_video(output_video_frames, save_path)
+    save_video(output_video_frames, "output_videos/output_video.avi")
     
-    return model_predictions_log, len(raw_frames)
-
-def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_margin):
-    start_time = time.time()
-
-    # LOAD GROUND TRUTH FROM JSON (Global)
-    ground_truth_path = input_video.rsplit(".", 1)[0] + ".json"
-    gold_standard_data = []
-    if ground_truth_path and os.path.exists(ground_truth_path):
-        print(f"Loading Ground Truth labels from: {ground_truth_path}")
-        with open(ground_truth_path, 'r') as f:
-            gold_standard_data = json.load(f)
-    elif ground_truth_path:
-        print(f"Warning: Ground Truth file not found at {ground_truth_path}")
-
-    # Check Video Duration
-    cap = cv2.VideoCapture(input_video)
-    if not cap.isOpened():
-        print("Error reading video file")
-        return
-    
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = total_frames / fps
-    cap.release()
-
-    global_predictions_log = []
-    
-    if duration <= 30:
-        print(f"Video duration is {duration:.2f}s. Processing as single file.")
-        logs, _ = process_video_sequence(input_video, 0, HDGCN_window_size, yolo_verbosity, player_detection_court_margin)
-        global_predictions_log.extend(logs)
-    else:
-        print(f"Video duration is {duration:.2f}s (>30s). Splitting into clips...")
-        clips = split_video_into_clips(input_video, clip_duration=30, output_dir="temp_clips")
-        
-        current_frame_offset = 0
-        
-        # Process sequentially
-        for clip_path in clips:
-            logs, frames_processed = process_video_sequence(clip_path, current_frame_offset, HDGCN_window_size, yolo_verbosity, player_detection_court_margin)
-            global_predictions_log.extend(logs)
-            
-            # Update offset for next clip
-            current_frame_offset += frames_processed
-            
-            # Clean up temp clip to save space
-            os.remove(clip_path) 
-
     # TIMER
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Total processing time: {elapsed_time:.2f} seconds")
+    print(f"Processing speed: {len(output_video_frames)/elapsed_time:.2f} FPS")
 
     # FINAL VALIDATION REPORT
-    print_validation_report(global_predictions_log, gold_standard_data)
+    print_validation_report(model_predictions_log, gold_standard_data)
 
 if __name__ == "__main__":
+    # Initialize the parser
     parser = argparse.ArgumentParser(description="Process a video file from a specific path using a specific window size and YOLO verbosity.")
+    
+    # Add the path argument
     parser.add_argument("--path", type=str, default = "input_videos/input_video.mp4", help="The full path to the video file", required=True)
+
     parser.add_argument("--window-size", type=int, default = 40, help="The HDGCN shot recognition window size", required=True)
+
     parser.add_argument("--yolo-verbosity", type=bool, default = False, help="YOLO log verbosity", required=True)
+
     parser.add_argument("--player-detection-court-margin", type=int, default = 300, help="Court margin for detecting players and excluding line judges (in pixels)", required=True)
+
+    # Parse the arguments
     args = parser.parse_args()
 
+    # Call main
     main(args.path, args.window_size, args.yolo_verbosity, args.player_detection_court_margin)
-}
