@@ -635,7 +635,7 @@ if __name__ == "__main__":
     processed_clip_dir = constants.PROCESSED_CLIP_DIR
     
     # Call your new function here
-    clip_paths = split_video_into_clips(args.path, args.clip_duration, temp_clip_dir)
+    clip_paths = split_video_into_clips(args.path, constants.CLIP_DURATION, temp_clip_dir)
     
     # Ensure output directory exists
     os.makedirs(processed_clip_dir, exist_ok=True)

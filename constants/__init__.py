@@ -25,3 +25,4 @@ BATCH_SIZE = 12
 
 TEMP_CLIP_DIR = "/kaggle/working/temp_processing_clips"
 PROCESSED_CLIP_DIR = "/kaggle/working/output_videos/clips"
+CLIP_DURATION = 30 #seconds
