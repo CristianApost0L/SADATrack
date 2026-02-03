@@ -76,6 +76,11 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
                                                      yolo_verbosity=yolo_verbosity
                                                      )
     
+    # FREE MEMORY: We are done with YOLO. Unload it to make room for TrackNet.
+    print("Unloading Player Tracker model to free VRAM...")
+    del player_tracker.model 
+    torch.cuda.empty_cache()
+
     # --- 3. DETECT BALL (Use RAW frames) ---
     # This ignores the noisy/grainy enhanced frames and looks at the clean original
     print("Detecting Ball on Raw Video...")
@@ -142,6 +147,11 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
 
     print(f"Refined Shots: {len(ball_shot_frames)} (Filtered noise by Proximity)")
     
+    # FREE MEMORY: We are done with TrackNet. Unload it.
+    print("Unloading Ball Tracker model to free VRAM...")
+    del ball_tracker.model
+    torch.cuda.empty_cache()
+
     # --- 4. COURT DETECTION (Use ENHANCED frames) ---
     # Lines are often faint, so contrast enhancement helps here too
     court_model_path = "/kaggle/input/cv-project/keypoints_model.pth"
