@@ -643,21 +643,30 @@ if __name__ == "__main__":
     # 3. PROCESS CLIPS SEQUENTIALLY
     all_model_predictions = []
 
-    # Sort clips to ensure order (though the naming convention should handle this, sorting is safer)
-    # Sorting by the 'chunk_idx' in the filename
-    clip_paths.sort(key=lambda x: int(x.split('_')[-2]))
+    # ONLY sort if we actually split the video (files match the pattern clip_X_Y)
+    # If it's the original file (len=1), we skip sorting to avoid the ValueError.
+    if len(clip_paths) > 1:
+        try:
+            clip_paths.sort(key=lambda x: int(x.split('_')[-2]))
+        except (ValueError, IndexError):
+            print("Warning: Could not sort clips by index. Processing in default order.")
 
     for clip_path in clip_paths:
         filename = os.path.basename(clip_path)
         print(f"\n--- Processing Clip: {filename} ---")
 
-        # Extract Frame Offset from filename: clip_{idx}_{start_frame}.mp4
-        # We split by '_' and take the last element, then remove extension
+        # Extract Frame Offset safely
+        # Expecting format: clip_{chunk_idx}_{start_frame}.mp4
         try:
-            start_frame_str = filename.split('_')[-1].split('.')[0]
-            frame_offset = int(start_frame_str)
+            # Check if this looks like one of our generated clips
+            if filename.startswith("clip_") and "_" in filename:
+                start_frame_str = filename.split('_')[-1].split('.')[0]
+                frame_offset = int(start_frame_str)
+            else:
+                # It's the original video (shorter than 30s)
+                frame_offset = 0
         except ValueError:
-            print("Error parsing frame offset from filename. Defaulting to 0.")
+            print("Error parsing frame offset. Defaulting to 0.")
             frame_offset = 0
 
         # Define output path for this specific clip
