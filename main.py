@@ -372,11 +372,26 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
         if len(player_positions) == 0:
             continue
 
-        player_shot_ball = min( player_positions.keys(), key=lambda player_id: measure_distance(player_positions[player_id],
-                                                                                                 ball_mini_court_detections[start_frame][1]))
+        # --- NEW LOGIC: COURT ZONES ---
+        ball_y_mini = ball_mini_court_detections[start_frame][1][1] # Get Y coord of ball on mini-court
+        net_y = (mini_court.court_start_y + mini_court.court_end_y) / 2
+        
+        if ball_y_mini > net_y:
+            # Ball is in Bottom Half -> Player 1
+            mapped_shooter_id = 1
+            # We still need the raw track_id to get keypoints. 
+            # Find the track_id mapped to '1' in your player_id_map
+            # (Inverting the map safely)
+            player_shot_ball = next((k for k, v in player_id_map.items() if v == 1), None)
+        else:
+            # Ball is in Top Half -> Player 2
+            mapped_shooter_id = 2
+            player_shot_ball = next((k for k, v in player_id_map.items() if v == 2), None)
 
-        # Map to 1 or 2
-        mapped_shooter_id = player_id_map.get(player_shot_ball, 1)
+        # Fallback if track_id not found (e.g. YOLO lost track for 1 frame)
+        if player_shot_ball is None:
+             # Just pick the first available ID to prevent crash, but mark it
+             player_shot_ball = list(player_positions.keys())[0]
 
         current_player_stats = deepcopy(player_stats_data[-1])
         current_player_stats['frame_num'] = start_frame
