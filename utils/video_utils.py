@@ -192,4 +192,3 @@ def split_video_into_clips(video_path, clip_duration=30, output_dir="temp_clips"
         
     cap.release()
     return clip_paths
-}
