@@ -1,5 +1,7 @@
 import cv2
 import constants
+import os
+import math
 
 def read_video(video_path):
     cap = cv2.VideoCapture(video_path)
@@ -133,3 +135,61 @@ def enhance_video_contrast(frames):
         enhanced_frames.append(frame_enhanced)
         
     return enhanced_frames
+
+def split_video_into_clips(video_path, clip_duration=30, output_dir="temp_clips"):
+    """
+    Splits a video into clips of a specified duration.
+    
+    Args:
+        video_path (str): Path to the input video.
+        clip_duration (int): Duration of each clip in seconds.
+        output_dir (str): Directory to save the clips.
+    
+    Returns:
+        list: A list of paths to the generated clip files.
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"Error opening video file {video_path}")
+        return []
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    frames_per_clip = int(fps * clip_duration)
+    clip_paths = []
+    chunk_idx = 0
+    curr_frame = 0
+
+    print(f"Splitting video into {clip_duration}s clips...")
+
+    while curr_frame < total_frames:
+        clip_name = f"clip_{chunk_idx}_{os.path.basename(video_path)}"
+        clip_path = os.path.join(output_dir, clip_name)
+        clip_paths.append(clip_path)
+        
+        # Initialize writer for this clip
+        # Try mp4v for mp4, or MJPG for avi depending on extension preference
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+        out = cv2.VideoWriter(clip_path, fourcc, fps, (width, height))
+        
+        processed_frames = 0
+        while processed_frames < frames_per_clip:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            out.write(frame)
+            processed_frames += 1
+            curr_frame += 1
+            
+        out.release()
+        chunk_idx += 1
+        
+    cap.release()
+    return clip_paths
+}
