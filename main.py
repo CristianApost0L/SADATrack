@@ -372,22 +372,26 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
         if len(player_positions) == 0:
             continue
 
-        # 1. FIND THE SHOOTER (Person closest to the ball)
-        # We search through all detected players in this frame and find the one closest to the ball
-        player_shot_ball = min(player_positions.keys(), key=lambda player_id: measure_distance(player_positions[player_id],
-                                                                                                 ball_mini_court_detections[start_frame][1]))
-
-        # 2. ASSIGN P1/P2 BASED ON COURT SIDE
-        # Now we check where THIS specific player is standing.
-        # Bottom Half = P1, Top Half = P2.
-        
-        shooter_pos = player_positions[player_shot_ball]
+        # --- NEW LOGIC: COURT ZONES ---
+        ball_y_mini = ball_mini_court_detections[start_frame][1][1] # Get Y coord of ball on mini-court
         net_y = (mini_court.court_start_y + mini_court.court_end_y) / 2
         
-        if shooter_pos[1] > net_y:
-            mapped_shooter_id = 1  # Player is in bottom half
+        if ball_y_mini > net_y:
+            # Ball is in Bottom Half -> Player 1
+            mapped_shooter_id = 1
+            # We still need the raw track_id to get keypoints. 
+            # Find the track_id mapped to '1' in your player_id_map
+            # (Inverting the map safely)
+            player_shot_ball = next((k for k, v in player_id_map.items() if v == 1), None)
         else:
-            mapped_shooter_id = 2  # Player is in top half
+            # Ball is in Top Half -> Player 2
+            mapped_shooter_id = 2
+            player_shot_ball = next((k for k, v in player_id_map.items() if v == 2), None)
+
+        # Fallback if track_id not found (e.g. YOLO lost track for 1 frame)
+        if player_shot_ball is None:
+             # Just pick the first available ID to prevent crash, but mark it
+             player_shot_ball = list(player_positions.keys())[0]
 
         current_player_stats = deepcopy(player_stats_data[-1])
         current_player_stats['frame_num'] = start_frame
