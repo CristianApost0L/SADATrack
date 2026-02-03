@@ -521,3 +521,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args.path, args.window_size, args.yolo_verbosity, args.player_detection_court_margin)
+}
