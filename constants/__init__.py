@@ -21,4 +21,7 @@ COURT_INFER_INTERVAL = 12 # Refresh court keypoints every half second (24 FPS vi
 
 FRAME_LIMIT_FOR_SERVES = 40 # From frames 0-40 we will allow serves, from frame 41 serves will be disabled
 
-BATCH_SIZE = 8
+BATCH_SIZE = 12
+
+TEMP_CLIP_DIR = "/kaggle/working/temp_processing_clips"
+PROCESSED_CLIP_DIR = "/kaggle/working/output_videos/clips"

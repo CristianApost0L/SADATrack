@@ -8,7 +8,8 @@ from utils import (read_video,
                    smooth_keypoints,
                    print_validation_report,
                    filter_adjacent_frames,
-                   get_proximity_score
+                   get_proximity_score,
+                   split_video_into_clips
                    )
 import constants
 from trackers import PlayerTracker, BallTracker, BounceDetector 
@@ -25,22 +26,12 @@ import os
 import argparse
 import time
 import json
+import shutil
 from ultralytics import YOLO 
 
 
-def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_margin):
+def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbosity, player_detection_court_margin, frame_offset=0):
     start_time = time.time()
-
-    # LOAD GROUND TRUTH FROM JSON
-    ground_truth_path = input_video.rsplit(".", 1)[0] + ".json"
-
-    gold_standard_data = []
-    if ground_truth_path and os.path.exists(ground_truth_path):
-        print(f"Loading Ground Truth labels from: {ground_truth_path}")
-        with open(ground_truth_path, 'r') as f:
-            gold_standard_data = json.load(f)
-    elif ground_truth_path:
-        print(f"Warning: Ground Truth file not found at {ground_truth_path}")
 
     model_predictions_log = []
 
@@ -476,8 +467,10 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
             shot_name = constants.THETIS_CLASSES[prediction_idx]
 
         # SAVE TO LOG
+        # Add frame_offset to start_frame so it matches the original full video
+        true_frame_index = start_frame + frame_offset
         model_predictions_log.append({
-            "frame": start_frame,
+            "frame": true_frame_index,
             "shot": shot_name,
             "player": mapped_shooter_id
         })
@@ -603,7 +596,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     if not os.path.exists("output_videos"):
         os.makedirs("output_videos")
 
-    save_video(output_video_frames, "output_videos/output_video.avi")
+    save_video(output_video_frames, "output_videos/output_path")
     
     # TIMER
     end_time = time.time()
@@ -611,8 +604,7 @@ def main(input_video, HDGCN_window_size, yolo_verbosity, player_detection_court_
     print(f"Total processing time: {elapsed_time:.2f} seconds")
     print(f"Processing speed: {len(output_video_frames)/elapsed_time:.2f} FPS")
 
-    # FINAL VALIDATION REPORT
-    print_validation_report(model_predictions_log, gold_standard_data)
+    return model_predictions_log
 
 if __name__ == "__main__":
     # Initialize the parser
@@ -630,5 +622,65 @@ if __name__ == "__main__":
     # Parse the arguments
     args = parser.parse_args()
 
-    # Call main
-    main(args.path, args.window_size, args.yolo_verbosity, args.player_detection_court_margin)
+    # 1. LOAD GLOBAL GROUND TRUTH ONCE
+    ground_truth_path = args.path.rsplit(".", 1)[0] + ".json"
+    gold_standard_data = []
+    if ground_truth_path and os.path.exists(ground_truth_path):
+        print(f"Loading Global Ground Truth from: {ground_truth_path}")
+        with open(ground_truth_path, 'r') as f:
+            gold_standard_data = json.load(f)
+
+    # 2. SPLIT VIDEO
+    temp_clip_dir = constants.TEMP_CLIP_DIR
+    processed_clip_dir = constants.PROCESSED_CLIP_DIR
+    
+    # Call your new function here
+    clip_paths = split_video_into_clips(args.path, args.clip_duration, temp_clip_dir)
+    
+    # Ensure output directory exists
+    os.makedirs(processed_clip_dir, exist_ok=True)
+
+    # 3. PROCESS CLIPS SEQUENTIALLY
+    all_model_predictions = []
+
+    # Sort clips to ensure order (though the naming convention should handle this, sorting is safer)
+    # Sorting by the 'chunk_idx' in the filename
+    clip_paths.sort(key=lambda x: int(x.split('_')[-2]))
+
+    for clip_path in clip_paths:
+        filename = os.path.basename(clip_path)
+        print(f"\n--- Processing Clip: {filename} ---")
+
+        # Extract Frame Offset from filename: clip_{idx}_{start_frame}.mp4
+        # We split by '_' and take the last element, then remove extension
+        try:
+            start_frame_str = filename.split('_')[-1].split('.')[0]
+            frame_offset = int(start_frame_str)
+        except ValueError:
+            print("Error parsing frame offset from filename. Defaulting to 0.")
+            frame_offset = 0
+
+        # Define output path for this specific clip
+        output_clip_path = os.path.join(processed_clip_dir, f"processed_{filename}")
+
+        # Process the clip
+        clip_predictions = process_single_clip(
+            input_video=clip_path,
+            output_path=output_clip_path,
+            HDGCN_window_size=args.window_size,
+            yolo_verbosity=args.yolo_verbosity,
+            player_detection_court_margin=args.player_detection_court_margin,
+            frame_offset=frame_offset
+        )
+        
+        # Aggregate stats
+        all_model_predictions.extend(clip_predictions)
+
+    # 4. FINAL REPORT & CLEANUP
+    print("\n--- All Clips Processed. Generating Final Report ---")
+    
+    # Compare the aggregated predictions against the global ground truth
+    print_validation_report(all_model_predictions, gold_standard_data)
+    
+    # Cleanup temp folder (Optional)
+    # shutil.rmtree(temp_clip_dir)

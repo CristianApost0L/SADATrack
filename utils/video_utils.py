@@ -1,5 +1,6 @@
 import cv2
 import constants
+import os
 
 def read_video(video_path):
     cap = cv2.VideoCapture(video_path)
@@ -133,3 +134,71 @@ def enhance_video_contrast(frames):
         enhanced_frames.append(frame_enhanced)
         
     return enhanced_frames
+
+def split_video_into_clips(video_path, output_dir, clip_duration=30):
+    """
+    Splits a video into clips of a specified duration with start-frame naming.
+    
+    Args:
+        video_path (str): Path to the input video.
+        clip_duration (int): Duration of each clip in seconds.
+        output_dir (str): Directory to save the clips.
+    
+    Returns:
+        list: A list of paths to the generated clip files.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"Error opening video file {video_path}")
+        return []
+
+    # 1. Get FPS and Total Frame Count
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    # 2. Calculate total duration in seconds
+    if fps > 0:
+        video_length_seconds = total_frames / fps
+    else:
+        print("Error: Could not determine FPS.")
+        return []
+
+    # 3. Check if video is shorter than the target clip duration
+    if video_length_seconds < clip_duration:
+        print(f"Video is {video_length_seconds:.2f}s (shorter than {clip_duration}s). Skipping split.")
+        cap.release()
+        # Return the original path since no splitting occurred
+        return [video_path]
+
+    frames_per_clip = int(fps * clip_duration)
+    clip_paths = []
+    chunk_idx = 1 
+    curr_frame = 0
+
+    print(f"Splitting video into {clip_duration}s clips...")
+
+    while curr_frame < total_frames:
+        start_frame = curr_frame
+        clip_name = f"clip_{chunk_idx}_{start_frame}.mp4"
+        clip_path = os.path.join(output_dir, clip_name)
+        clip_paths.append(clip_path)
+        
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+        out = cv2.VideoWriter(clip_path, fourcc, fps, (int(cap.get(3)), int(cap.get(4))))
+        
+        processed_frames = 0
+        while processed_frames < frames_per_clip:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            out.write(frame)
+            processed_frames += 1
+            curr_frame += 1
+            
+        out.release()
+        chunk_idx += 1
+        
+    cap.release()
+    return clip_paths
