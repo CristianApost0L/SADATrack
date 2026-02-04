@@ -243,7 +243,7 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     # --- DYNAMIC ID MAPPING (IMPROVED) ---
     # Goal: Robustly identify Player 1 (Closest/Bottom) and Player 2 (Farthest/Top)
     
-    # 1. Filter Noise & Select Players based on "Inside Court" Logic
+    # 1. Filter Noise & Select Players based on Proximity to Court Center
     id_positions = {}
     id_occupancy = {}
     
@@ -259,68 +259,51 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
             id_positions[track_id].append((cx, cy))
             id_occupancy[track_id] = id_occupancy.get(track_id, 0) + 1
 
-    # B. Calculate Court Center & Boundaries
+    # B. Calculate Court Center (using first frame keypoints)
+    # We try to use the keypoints from the first valid frame
     court_center_x, court_center_y = 0, 0
-    min_court_x = float('-inf')
-    max_court_x = float('inf')
     found_court = False
     
     # Scan for the first valid court keypoints
     for kpts in court_keypoints:
-        # Check if kpts is not None and has valid length
-        if kpts is not None and len(kpts) >= 4: 
-             # Extract x and y (filter out 0s)
+        # Check if kpts is valid list and has content
+        if kpts is not None and len(kpts) >= 4: # at least 2 points
+             # Extract x and y (filter out 0s which might be missing points)
              xs = [x for x in kpts[0::2] if x > 1]
              ys = [y for y in kpts[1::2] if y > 1]
              
-             if len(xs) > 0 and len(ys) > 0:
+             if xs and ys:
                  court_center_x = sum(xs) / len(xs)
                  court_center_y = sum(ys) / len(ys)
-                 
-                 # NEW: Get the left-most and right-most court lines
-                 min_court_x = min(xs)
-                 max_court_x = max(xs)
-                 
                  found_court = True
                  break
     
-    # Fallback
+    # Fallback if no court found: Use Image Center
     if not found_court:
         h, w = raw_frames[0].shape[:2]
         court_center_x, court_center_y = w/2, h/2
 
-    # C. Score IDs
-    id_scores = {}
+    # C. Score IDs by Distance to Center
+    id_avg_dist = {}
     for tid, positions in id_positions.items():
-        # Frequency Filter: Must appear in at least 5 frames
+        # Filter: Object must appear in at least 5 frames to be a candidate
         if id_occupancy[tid] < 5:
             continue
             
-        # Average position
+        # Calculate average centroid of this object
         avg_x = sum(p[0] for p in positions) / len(positions)
         avg_y = sum(p[1] for p in positions) / len(positions)
         
-        # 1. Base Score: Distance to Center (Lower is better)
-        score = ((avg_x - court_center_x)**2 + (avg_y - court_center_y)**2) ** 0.5
-        
-        # 2. PENALTY: Horizontal Bounds Check
-        # If the object is outside the court width (plus a small margin for running wide),
-        # we add a HUGE penalty.
-        # Margin = 100 pixels (allows players to run slightly wide, but excludes net judges)
-        margin = 100 
-        
-        if found_court:
-            if avg_x < (min_court_x - margin) or avg_x > (max_court_x + margin):
-                score += 10000 # Massive penalty for being outside the court lines
-                
-        id_scores[tid] = score
+        # Euclidean distance to court center
+        dist = ((avg_x - court_center_x)**2 + (avg_y - court_center_y)**2) ** 0.5
+        id_avg_dist[tid] = dist
 
-    # D. Select Top 2 Lowest Scores
-    # The ballboy (outside lines) will have a score like 10,200
-    # The opponent (far back but inside lines) will have a score like 600.
-    valid_ids = sorted(id_scores, key=id_scores.get)[:2]
-
-    print(f"Selected Player IDs (Penalty Applied): {valid_ids}")
+    # D. Select Top 2 Closest IDs
+    # Sort by Distance (Ascending = Closer is better)
+    # We take the keys (track_ids) with the smallest distance values
+    valid_ids = sorted(id_avg_dist, key=id_avg_dist.get)[:2]
+    
+    print(f"Selected Player IDs based on Center Proximity: {valid_ids}")
     
     # 2. Assign IDs based on "Size" (Bounding Box Height)
     # The closer player (Player 1) will have a larger bounding box height.
