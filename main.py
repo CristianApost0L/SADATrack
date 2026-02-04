@@ -692,7 +692,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--window-size", type=int, default = 40, help="The HDGCN shot recognition window size", required=True)
 
-    parser.add_argument("--yolo-verbosity", type=bool, default = False, help="YOLO log verbosity", required=True)
+    parser.add_argument("--yolo-verbosity", action='store_true', help="Enable YOLO verbose logging")
 
     parser.add_argument("--player-detection-court-margin", type=int, default = 300, help="Court margin for detecting players and excluding line judges (in pixels)", required=True)
 
