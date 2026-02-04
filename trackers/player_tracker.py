@@ -56,6 +56,14 @@ class PlayerTracker:
                 # Right Line Limit
                 right_limit_x = tr[0] + (br[0] - tr[0]) * (py - tr[1]) / (br[1] - tr[1] + 1e-6)
                 
+                # --- NEW Y-CHECK ---
+                min_y = tl[1] - player_detection_court_margin
+                max_y = bl[1] + player_detection_court_margin
+
+                if not (min_y < py < max_y):
+                    print(f"[DEBUG] ID {track_id} removed: Y-pos {py:.1f} is outside depth limits [{min_y:.1f}, {max_y:.1f}]")
+                    continue
+                
                 # Check if player is within the width limits
                 margin = player_detection_court_margin
                 
