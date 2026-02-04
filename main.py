@@ -91,46 +91,53 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     # 2. Detect Bounces using the new Model
     detected_bounces = []
     # Pass the list of (x,y) tuples directly
-    #detected_bounces = bounce_detector.predict(ball_detections) 
+    detected_bounces = bounce_detector.predict(ball_detections) 
 
     # 3. Filter: Keep a candidate ONLY if it is NOT a bounce
-    clean_candidates = candidate_shot_frames
+    clean_candidates = []
+    for frame in candidate_shot_frames:
+        # Check if this frame is close to any detected bounce (within margin of error, e.g., 3 frames)
+        is_bounce = False
+        for b_frame in detected_bounces:
+            if abs(frame - b_frame) <= 3: 
+                is_bounce = True
+                break
+        
+        # If it's not a bounce, it's a hit!
+        if not is_bounce:
+            clean_candidates.append(frame)
 
     # SMART FILTERING: Group frames and pick the one CLOSEST to a player
     # Instead of just taking the first frame (filter_adjacent_frames), we verify proximity.
     
-    MAX_HIT_DISTANCE = 100
     ball_shot_frames = []
     
     if clean_candidates:
         clean_candidates.sort()
         current_group = [clean_candidates[0]]
         
+        # Iterate and group
         for i in range(1, len(clean_candidates)):
             frame = clean_candidates[i]
             prev_frame = current_group[-1]
             
+            # If frames are close (within 24 frames / 1 sec), they belong to the same "Shot Event"
             if frame - prev_frame <= 24:
                 current_group.append(frame)
             else:
-                # Group finished -> Find the best frame AND its score
-                best_frame = min(current_group, key=lambda x: get_proximity_score(ball_detections, player_detections, x))
-                min_dist = get_proximity_score(ball_detections, player_detections, best_frame)
+                # Group finished -> Pick the Best Frame in this group
+                best_frame = min(current_group, key=lambda x: get_proximity_score(ball_detections, player_detections, x))                
+                ball_shot_frames.append(best_frame)
                 
-                # ONLY keep this event if the player is actually close enough to hit it
-                if min_dist < MAX_HIT_DISTANCE:
-                    ball_shot_frames.append(best_frame)
-                
+                # Start new group
                 current_group = [frame]
         
-        # Process final group
+        # Process the final group
         if current_group:
             best_frame = min(current_group, key=lambda x: get_proximity_score(ball_detections, player_detections, x))
-            min_dist = get_proximity_score(ball_detections, player_detections, best_frame)
-            if min_dist < MAX_HIT_DISTANCE:
-                ball_shot_frames.append(best_frame)
+            ball_shot_frames.append(best_frame)
 
-    print(f"Refined Shots: {len(ball_shot_frames)} (Filtered by Max Distance {MAX_HIT_DISTANCE}px)")
+    print(f"Refined Shots: {len(ball_shot_frames)} (Filtered noise by Proximity)")
     
     # FREE MEMORY: We are done with TrackNet. Unload it.
     print("Unloading Ball Tracker model to free VRAM...")
