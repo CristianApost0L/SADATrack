@@ -243,54 +243,15 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     # --- DYNAMIC ID MAPPING (IMPROVED) ---
     # Goal: Robustly identify Player 1 (Closest/Bottom) and Player 2 (Farthest/Top)
     
-    # 1. Filter Noise: Choose Top 2 IDs based on PROXIMITY to court center
-    # Ball boys are static at the edges; Players are central.
-    
-    # Calculate an approximate "Court Center" from the first valid frame
-    court_center_x, court_center_y = None, None
-    if court_keypoints and len(court_keypoints) > 0 and court_keypoints[0] is not None:
-        # Filter out 0s (undetected points)
-        valid_pts = [x for x in court_keypoints[0] if x != 0]
-        if len(valid_pts) >= 4:
-            # court_keypoints is flat [x1, y1, x2, y2...]
-            xs = valid_pts[0::2]
-            ys = valid_pts[1::2]
-            court_center_x = sum(xs) / len(xs)
-            court_center_y = sum(ys) / len(ys)
-
-    # Fallback if court detection failed
-    if court_center_x is None:
-        h, w = raw_frames[0].shape[:2]
-        court_center_x, court_center_y = w / 2, h / 2
-
-    id_proximity_score = {}
-
+    # 1. Filter Noise: Find the two most frequent Track IDs
+    id_occupancy = {}
     for frame_dict in player_detections:
-        for track_id, data in frame_dict.items():
-            bbox = data['bbox']
-            # Calculate Player Center
-            p_cx = (bbox[0] + bbox[2]) / 2
-            p_cy = (bbox[1] + bbox[3]) / 2
+        for track_id in frame_dict.keys():
+            id_occupancy[track_id] = id_occupancy.get(track_id, 0) + 1
             
-            # Calculate distance to Court Center
-            dist = ((p_cx - court_center_x)**2 + (p_cy - court_center_y)**2)**0.5
-            
-            # Accumulate distance (Lower is better)
-            if track_id not in id_proximity_score:
-                id_proximity_score[track_id] = []
-            id_proximity_score[track_id].append(dist)
-
-    # Calculate Average Distance for each ID
-    final_scores = {}
-    for tid, dists in id_proximity_score.items():
-        # Filter out short flashes of noise (must exist for >10 frames)
-        if len(dists) > 10:
-            final_scores[tid] = sum(dists) / len(dists)
-        else:
-            final_scores[tid] = float('inf') # Penalize noise
-
-    # Pick the 2 IDs with the LOWEST average distance to center
-    valid_ids = sorted(final_scores, key=final_scores.get)[:2]
+    # Select top 2 IDs based on how many frames they appear in
+    # This removes ball boys or line judges who are only detected briefly
+    valid_ids = sorted(id_occupancy, key=id_occupancy.get, reverse=True)[:2]
     
     # 2. Assign IDs based on "Size" (Bounding Box Height)
     # The closer player (Player 1) will have a larger bounding box height.
