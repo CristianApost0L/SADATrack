@@ -243,91 +243,102 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     # --- DYNAMIC ID MAPPING (IMPROVED) ---
     # Goal: Robustly identify Player 1 (Closest/Bottom) and Player 2 (Farthest/Top)
     
-    # 1. ANALYSIS: Gather Data for ALL Detected IDs (Do not filter yet)
+    # 1. Filter Noise: Find the two most frequent Track IDs
     id_occupancy = {}
-    current_centroids = {}
-    
     for frame_dict in player_detections:
-        for track_id, data in frame_dict.items():
-            # Count frequency
+        for track_id in frame_dict.keys():
             id_occupancy[track_id] = id_occupancy.get(track_id, 0) + 1
             
-            # Save the first position found for this ID (for handover matching)
-            if track_id not in current_centroids:
-                bbox = data['bbox']
-                cx = (bbox[0] + bbox[2]) / 2
-                cy = (bbox[1] + bbox[3]) / 2
-                current_centroids[track_id] = np.array([cx, cy])
+    # Select top 2 IDs based on how many frames they appear in
+    # This removes ball boys or line judges who are only detected briefly
+    valid_ids = sorted(id_occupancy, key=id_occupancy.get, reverse=True)[:2]
+    
+    # 2. Assign IDs based on "Size" (Bounding Box Height)
+    # The closer player (Player 1) will have a larger bounding box height.
+    id_avg_height = {}
+    
+    for pid in valid_ids:
+        heights = []
+        for frame_dict in player_detections:
+            if pid in frame_dict:
+                bbox = frame_dict[pid]['bbox']
+                # Calculate height: y2 - y1
+                h = bbox[3] - bbox[1]
+                heights.append(h)
+        
+        # Calculate average height for this player ID
+        if heights:
+            id_avg_height[pid] = sum(heights) / len(heights)
+        else:
+            id_avg_height[pid] = 0
 
+    # Sort IDs by Height: Largest (Closest) -> Smallest (Farthest)
+    sorted_ids = sorted(valid_ids, key=lambda x: id_avg_height.get(x, 0), reverse=True)
+    
     player_id_map = {}
-    used_track_ids = set()
-
-    # 2. PHASE 1: Position-Based Handover (HIGHEST PRIORITY)
-    # Check if any ID (even a "rare" one) matches the position of a player from the previous clip
-    if last_known_positions is not None:
+    
+    # --- NEW LOGIC: Position-Based Handover ---
+    mapped_via_position = False
+    
+    if last_known_positions is not None and len(valid_ids) >= 1:
         print("Attempting to map IDs based on previous clip positions...")
+        
+        # Get centroids of the current valid IDs in the FIRST frame they appear
+        current_centroids = {}
+        for pid in valid_ids:
+            # Find first frame where this pid appears
+            for frame_dict in player_detections:
+                if pid in frame_dict:
+                    bbox = frame_dict[pid]['bbox']
+                    cx = (bbox[0] + bbox[2]) / 2
+                    cy = (bbox[1] + bbox[3]) / 2
+                    current_centroids[pid] = np.array([cx, cy])
+                    break
+        
+        # Match current IDs to P1/P2 from previous clip
+        used_pids = set()
         
         for p_num, prev_pos in last_known_positions.items():
             best_pid = None
             min_dist = float('inf')
             prev_pos_arr = np.array(prev_pos)
             
-            # Check EVERY ID detected in this clip
             for pid, curr_pos in current_centroids.items():
-                if pid in used_track_ids: continue
+                if pid in used_pids: continue
                 
                 dist = np.linalg.norm(curr_pos - prev_pos_arr)
-                
-                # Threshold: Player shouldn't have moved > 300px between clips
+                # Threshold: Players shouldn't jump > 300px between clips
                 if dist < min_dist and dist < 300: 
                     min_dist = dist
                     best_pid = pid
             
             if best_pid is not None:
                 player_id_map[best_pid] = p_num
-                used_track_ids.add(best_pid)
+                used_pids.add(best_pid)
                 print(f"Mapped Track ID {best_pid} -> Player {p_num} (Dist: {min_dist:.1f}px)")
+                mapped_via_position = True
 
-    # 3. PHASE 2: Frequency & Size Heuristic (FALLBACK)
-    # If we haven't found P1 or P2 yet, look for the most frequent/largest remaining IDs
-    
-    # Get IDs that haven't been mapped yet
-    remaining_ids = [pid for pid in id_occupancy if pid not in used_track_ids]
-    
-    # Filter noise: Only consider IDs that appear in at least 5 frames
-    # (unless the video is very short, then keep all)
-    valid_remaining = [pid for pid in remaining_ids if id_occupancy[pid] > 5]
-    if not valid_remaining: 
-        valid_remaining = remaining_ids
-
-    # Calculate Average Height for remaining candidates
-    id_avg_height = {}
-    for pid in valid_remaining:
-        heights = []
-        for frame_dict in player_detections:
-            if pid in frame_dict:
-                bbox = frame_dict[pid]['bbox']
-                heights.append(bbox[3] - bbox[1])
-        id_avg_height[pid] = sum(heights) / len(heights) if heights else 0
-
-    # Sort: Largest Height (Closest) -> Smallest Height (Farthest)
-    sorted_remaining = sorted(valid_remaining, key=lambda x: id_avg_height.get(x, 0), reverse=True)
-
-    # Assign Player 1 (Closest/Bottom) if missing
-    if 1 not in player_id_map.values() and len(sorted_remaining) > 0:
-        p1_candidate = sorted_remaining.pop(0) # Take the largest
-        player_id_map[p1_candidate] = 1
-        used_track_ids.add(p1_candidate)
-        print(f"Identified Player 1 (Heuristic - Size): Track ID {p1_candidate}")
+    # --- FALLBACK: ORIGINAL HEIGHT HEURISTIC ---
+    # If we couldn't map via position (first clip, or tracking lost), use height
+    if not mapped_via_position or len(player_id_map) < len(valid_ids):
+        print("Using Height Heuristic for remaining IDs...")
+        
+        # Assign Player 1 (Closest/Largest) if not already assigned
+        if len(sorted_ids) >= 1:
+            p1_candidate = sorted_ids[0]
+            if 1 not in player_id_map.values() and p1_candidate not in player_id_map:
+                player_id_map[p1_candidate] = 1
+                print(f"Identified Player 1 (Closest): Track ID {p1_candidate}")
             
-    # Assign Player 2 (Farthest/Top) if missing
-    if 2 not in player_id_map.values() and len(sorted_remaining) > 0:
-        p2_candidate = sorted_remaining.pop(0) # Take the next largest
-        player_id_map[p2_candidate] = 2
-        used_track_ids.add(p2_candidate)
-        print(f"Identified Player 2 (Heuristic - Size): Track ID {p2_candidate}")
+        # Assign Player 2 (Farthest/Smallest) if not already assigned
+        if len(sorted_ids) >= 2:
+            p2_candidate = sorted_ids[1]
+            # Special check: If p2_candidate was assigned to P1 (because P1 is missing), don't overwrite
+            if 2 not in player_id_map.values() and p2_candidate not in player_id_map:
+                player_id_map[p2_candidate] = 2
+                print(f"Identified Player 2 (Farthest): Track ID {p2_candidate}")
     
-    # 4. SAFETY: Map stray IDs to prevent crashes
+    # Fallback: Map any other stray IDs to Player 1 to prevent crashes
     all_detected_ids = set(id_occupancy.keys())
     for pid in all_detected_ids:
         if pid not in player_id_map:
