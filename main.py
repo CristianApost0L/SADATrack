@@ -306,7 +306,8 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
         # 2. PENALTY: Horizontal Bounds Check
         # If the object is outside the court width (plus a small margin for running wide),
         # we add a HUGE penalty.
-        margin = player_detection_court_margin
+        # Margin = 100 pixels (allows players to run slightly wide, but excludes net judges)
+        margin = 100 
         
         if found_court:
             if avg_x < (min_court_x - margin) or avg_x > (max_court_x + margin):
