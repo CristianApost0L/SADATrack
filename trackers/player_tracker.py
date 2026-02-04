@@ -70,6 +70,10 @@ class PlayerTracker:
             br = bottom_half[np.argmax(bottom_half[:, 0])]
 
             for track_id, player_data in player_dict.items():
+                # If we forced this ID, skip ALL margin checks.
+                if track_id in forced_ids:
+                    continue
+                
                 bbox = player_data["bbox"]
                 
                 # CRITICAL FIX: Use foot position (ground plane), not center
