@@ -172,7 +172,7 @@ def enhance_video_contrast(frames):
         
     return enhanced_frames
 
-def split_video_into_clips(video_path, output_dir, clip_duration=30):
+def split_video_into_clips(video_path, output_dir, clip_duration=60):
     """
     Splits a video into clips of a specified duration with start-frame naming.
     
@@ -205,12 +205,6 @@ def split_video_into_clips(video_path, output_dir, clip_duration=30):
     # 3. Check if video is shorter than the target clip duration
     if video_length_seconds < clip_duration:
         print(f"Video is {video_length_seconds:.2f}s (shorter than {clip_duration}s). Skipping split.")
-        cap.release()
-        # Return the original path since no splitting occurred
-        return [video_path]
-    
-    if video_length_seconds < 60:
-        print(f"Video is {video_length_seconds:.2f}s (shorter than 60s). Skipping split.")
         cap.release()
         # Return the original path since no splitting occurred
         return [video_path]
