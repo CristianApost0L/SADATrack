@@ -243,67 +243,15 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     # --- DYNAMIC ID MAPPING (IMPROVED) ---
     # Goal: Robustly identify Player 1 (Closest/Bottom) and Player 2 (Farthest/Top)
     
-    # 1. Filter Noise & Select Players based on Proximity to Court Center
-    id_positions = {}
+    # 1. Filter Noise: Find the two most frequent Track IDs
     id_occupancy = {}
-    
-    # A. Collect all positions
     for frame_dict in player_detections:
-        for track_id, data in frame_dict.items():
-            bbox = data['bbox']
-            cx = (bbox[0] + bbox[2]) / 2
-            cy = (bbox[1] + bbox[3]) / 2
-            
-            if track_id not in id_positions:
-                id_positions[track_id] = []
-            id_positions[track_id].append((cx, cy))
+        for track_id in frame_dict.keys():
             id_occupancy[track_id] = id_occupancy.get(track_id, 0) + 1
-
-    # B. Calculate Court Center (using first frame keypoints)
-    # We try to use the keypoints from the first valid frame
-    court_center_x, court_center_y = 0, 0
-    found_court = False
-    
-    # Scan for the first valid court keypoints
-    for kpts in court_keypoints:
-        # Check if kpts is valid list and has content
-        if kpts and len(kpts) >= 4: # at least 2 points
-             # Extract x and y (filter out 0s which might be missing points)
-             xs = [x for x in kpts[0::2] if x > 1]
-             ys = [y for y in kpts[1::2] if y > 1]
-             
-             if xs and ys:
-                 court_center_x = sum(xs) / len(xs)
-                 court_center_y = sum(ys) / len(ys)
-                 found_court = True
-                 break
-    
-    # Fallback if no court found: Use Image Center
-    if not found_court:
-        h, w = raw_frames[0].shape[:2]
-        court_center_x, court_center_y = w/2, h/2
-
-    # C. Score IDs by Distance to Center
-    id_avg_dist = {}
-    for tid, positions in id_positions.items():
-        # Filter: Object must appear in at least 5 frames to be a candidate
-        if id_occupancy[tid] < 5:
-            continue
             
-        # Calculate average centroid of this object
-        avg_x = sum(p[0] for p in positions) / len(positions)
-        avg_y = sum(p[1] for p in positions) / len(positions)
-        
-        # Euclidean distance to court center
-        dist = ((avg_x - court_center_x)**2 + (avg_y - court_center_y)**2) ** 0.5
-        id_avg_dist[tid] = dist
-
-    # D. Select Top 2 Closest IDs
-    # Sort by Distance (Ascending = Closer is better)
-    # We take the keys (track_ids) with the smallest distance values
-    valid_ids = sorted(id_avg_dist, key=id_avg_dist.get)[:2]
-    
-    print(f"Selected Player IDs based on Center Proximity: {valid_ids}")
+    # Select top 2 IDs based on how many frames they appear in
+    # This removes ball boys or line judges who are only detected briefly
+    valid_ids = sorted(id_occupancy, key=id_occupancy.get, reverse=True)[:2]
     
     # 2. Assign IDs based on "Size" (Bounding Box Height)
     # The closer player (Player 1) will have a larger bounding box height.
