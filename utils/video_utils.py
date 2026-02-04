@@ -62,6 +62,39 @@ def save_video(output_video_frames, output_video_path):
         out.write(frame)
     out.release()
 
+def merge_clips(clip_paths, output_path, fps=24):
+    """
+    Merges multiple video clips into a single video file.
+    """
+    if not clip_paths:
+        print("No clips to merge.")
+        return
+
+    print(f"Merging {len(clip_paths)} clips into {output_path}...")
+
+    # Read the first clip to get dimensions
+    cap = cv2.VideoCapture(clip_paths[0])
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+
+    # Initialize Video Writer
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+    for clip in clip_paths:
+        print(f"  - Appending {os.path.basename(clip)}")
+        cap = cv2.VideoCapture(clip)
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            out.write(frame)
+        cap.release()
+
+    out.release()
+    print("Merge complete.")
+
 def draw_skeletons(video_frames, player_detections, ):
     output_frames = []
     # COCO Keypoint connections (standard skeleton structure)

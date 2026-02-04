@@ -9,7 +9,8 @@ from utils import (read_video,
                    print_validation_report,
                    filter_adjacent_frames,
                    get_proximity_score,
-                   split_video_into_clips
+                   split_video_into_clips,
+                   merge_clips
                    )
 import constants
 from trackers import PlayerTracker, BallTracker, BounceDetector 
@@ -715,6 +716,9 @@ if __name__ == "__main__":
     all_model_predictions = []
     last_clip_positions = None
 
+    # Store the paths of the *processed* clips to merge them later
+    processed_files_list = []
+
     # ONLY sort if we actually split the video (files match the pattern clip_X_Y)
     # If it's the original file (len=1), we skip sorting to avoid the ValueError.
     if len(clip_paths) > 1:
@@ -744,6 +748,8 @@ if __name__ == "__main__":
         # Define output path for this specific clip
         output_clip_path = os.path.join(processed_clip_dir, f"processed_{filename}")
 
+        processed_files_list.append(output_clip_path)
+
         # Process the clip
         clip_preds_list, last_clip_positions = process_single_clip(
             input_video=clip_path,
@@ -758,11 +764,22 @@ if __name__ == "__main__":
         # Aggregate stats
         all_model_predictions.extend(clip_preds_list)
 
-    # 4. FINAL REPORT & CLEANUP
+    # 4. FINAL REPORT
     print("\n--- All Clips Processed. Generating Final Report ---")
     
     # Compare the aggregated predictions against the global ground truth
     print_validation_report(all_model_predictions, gold_standard_data)
     
-    # Cleanup temp folder (Optional)
-    # shutil.rmtree(temp_clip_dir)
+    # MERGE LOGIC
+    print("\n--- Merging Processed Clips ---")
+    final_output_path = "/kaggle/working/output_videos/input_video.mp4"
+    
+    # Ensure the folder exists
+    if not os.path.exists("output_videos"):
+        os.makedirs("output_videos")
+
+    merge_clips(processed_files_list, final_output_path)
+    
+    # Cleanup temp folder
+    shutil.rmtree(temp_clip_dir)
+    shutil.rmtree(processed_clip_dir)
