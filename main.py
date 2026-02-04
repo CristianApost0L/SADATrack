@@ -645,10 +645,12 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     for i, frame in enumerate(output_video_frames):
         cv2.putText(frame, f"Frame: {i}",(10,30),cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-    if not os.path.exists("output_videos"):
-        os.makedirs("output_videos")
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    save_video(output_video_frames, "output_videos/output_path")
+    # Use the 'output_path' argument passed to the function
+    save_video(output_video_frames, output_path)
     
     # TIMER
     end_time = time.time()
