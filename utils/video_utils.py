@@ -208,6 +208,12 @@ def split_video_into_clips(video_path, output_dir, clip_duration=30):
         cap.release()
         # Return the original path since no splitting occurred
         return [video_path]
+    
+    if video_length_seconds < 60:
+        print(f"Video is {video_length_seconds:.2f}s (shorter than 60s). Skipping split.")
+        cap.release()
+        # Return the original path since no splitting occurred
+        return [video_path]
 
     frames_per_clip = int(fps * clip_duration)
     clip_paths = []
