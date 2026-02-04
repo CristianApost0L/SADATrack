@@ -11,9 +11,9 @@ class PlayerTracker:
     def __init__(self,model_path):
         self.model = YOLO(model_path)
 
-    def choose_and_filter_players(self, court_keypoints, player_detections, player_detection_court_margin):
+    def choose_and_filter_players(self, court_keypoints, player_detections, player_detection_court_margin, last_known_positions=None):
         player_detections_first_frame = player_detections[0]
-        chosen_player = self.choose_players(court_keypoints, player_detections_first_frame, player_detection_court_margin)
+        chosen_player = self.choose_players(court_keypoints, player_detections_first_frame, player_detection_court_margin, last_known_positions)
         filtered_player_detections = []
         for player_dict in player_detections:
             # Preserve the whole data object (bbox + keypoints) for chosen players
@@ -21,7 +21,7 @@ class PlayerTracker:
             filtered_player_detections.append(filtered_player_dict)
         return filtered_player_detections
 
-    def choose_players(self, court_keypoints, player_dict, player_detection_court_margin):
+    def choose_players(self, court_keypoints, player_dict, player_detection_court_margin, last_known_positions=None):
         # 1. Convert keypoints to numpy for easier calc
         court_kps = np.array(court_keypoints).reshape(-1, 2)
         
@@ -31,7 +31,36 @@ class PlayerTracker:
         bottom_half = court_kps[court_kps[:, 1] > avg_y]
         
         valid_ids = []
-        
+        forced_ids = set()
+
+        # --- NEW LOGIC: Force-Keep Players from Previous Clip ---
+        if last_known_positions is not None:
+            print("Filtering using Last Known Positions...")
+            for p_num, pos in last_known_positions.items():
+                target_pos = np.array(pos)
+                min_dist = float('inf')
+                best_id = None
+                
+                # Find the closest detection to this known position
+                for track_id, player_data in player_dict.items():
+                    bbox = player_data["bbox"]
+                    # Use center of box for simple distance check
+                    cx = (bbox[0] + bbox[2]) / 2
+                    cy = (bbox[1] + bbox[3]) / 2
+                    current_pos = np.array([cx, cy])
+                    
+                    dist = np.linalg.norm(current_pos - target_pos)
+                    
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_id = track_id
+                
+                # If we found a match within a reasonable range (e.g. 200px), FORCE KEEP IT
+                if best_id is not None and min_dist < 200:
+                    valid_ids.append(best_id)
+                    forced_ids.add(best_id)
+                    print(f"  [Override] Force-keeping ID {best_id} (Matches P{p_num}, Dist: {min_dist:.1f}px)")
+
         # Safety check
         if len(top_half) > 0 and len(bottom_half) > 0:
             # Find the 4 corners: Top-Left, Top-Right, Bottom-Left, Bottom-Right

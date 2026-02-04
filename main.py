@@ -167,7 +167,12 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
         court_keypoints.append(last_keypoints)
 
     # Choose players
-    player_detections = player_tracker.choose_and_filter_players(court_keypoints[0], player_detections, player_detection_court_margin = player_detection_court_margin)
+    player_detections = player_tracker.choose_and_filter_players(
+        court_keypoints[0], 
+        player_detections, 
+        player_detection_court_margin=player_detection_court_margin,
+        last_known_positions=last_known_positions 
+    )
 
     pose_estimator = YOLO('/kaggle/input/cv-project/yolo26x-pose.pt')
 
