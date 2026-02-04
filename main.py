@@ -30,7 +30,7 @@ import shutil
 from ultralytics import YOLO 
 
 
-def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbosity, player_detection_court_margin, frame_offset=0):
+def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbosity, player_detection_court_margin, frame_offset=0, last_known_positions=None):
     start_time = time.time()
 
     model_predictions_log = []
@@ -274,16 +274,68 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     # Sort IDs by Height: Largest (Closest) -> Smallest (Farthest)
     sorted_ids = sorted(valid_ids, key=lambda x: id_avg_height.get(x, 0), reverse=True)
     
-    player_id_map = {} 
-    # Assign Player 1 to the largest ID
-    if len(sorted_ids) >= 1: 
-        player_id_map[sorted_ids[0]] = 1
-        print(f"Identified Player 1 (Closest): Track ID {sorted_ids[0]} (Avg Height: {id_avg_height[sorted_ids[0]]:.1f}px)")
+    player_id_map = {}
+    
+    # --- NEW LOGIC: Position-Based Handover ---
+    mapped_via_position = False
+    
+    if last_known_positions is not None and len(valid_ids) >= 1:
+        print("Attempting to map IDs based on previous clip positions...")
         
-    # Assign Player 2 to the smaller ID
-    if len(sorted_ids) >= 2: 
-        player_id_map[sorted_ids[1]] = 2
-        print(f"Identified Player 2 (Farthest): Track ID {sorted_ids[1]} (Avg Height: {id_avg_height[sorted_ids[1]]:.1f}px)")
+        # Get centroids of the current valid IDs in the FIRST frame they appear
+        current_centroids = {}
+        for pid in valid_ids:
+            # Find first frame where this pid appears
+            for frame_dict in player_detections:
+                if pid in frame_dict:
+                    bbox = frame_dict[pid]['bbox']
+                    cx = (bbox[0] + bbox[2]) / 2
+                    cy = (bbox[1] + bbox[3]) / 2
+                    current_centroids[pid] = np.array([cx, cy])
+                    break
+        
+        # Match current IDs to P1/P2 from previous clip
+        used_pids = set()
+        
+        for p_num, prev_pos in last_known_positions.items():
+            best_pid = None
+            min_dist = float('inf')
+            prev_pos_arr = np.array(prev_pos)
+            
+            for pid, curr_pos in current_centroids.items():
+                if pid in used_pids: continue
+                
+                dist = np.linalg.norm(curr_pos - prev_pos_arr)
+                # Threshold: Players shouldn't jump > 300px between clips
+                if dist < min_dist and dist < 300: 
+                    min_dist = dist
+                    best_pid = pid
+            
+            if best_pid is not None:
+                player_id_map[best_pid] = p_num
+                used_pids.add(best_pid)
+                print(f"Mapped Track ID {best_pid} -> Player {p_num} (Dist: {min_dist:.1f}px)")
+                mapped_via_position = True
+
+    # --- FALLBACK: ORIGINAL HEIGHT HEURISTIC ---
+    # If we couldn't map via position (first clip, or tracking lost), use height
+    if not mapped_via_position or len(player_id_map) < len(valid_ids):
+        print("Using Height Heuristic for remaining IDs...")
+        
+        # Assign Player 1 (Closest/Largest) if not already assigned
+        if len(sorted_ids) >= 1:
+            p1_candidate = sorted_ids[0]
+            if 1 not in player_id_map.values() and p1_candidate not in player_id_map:
+                player_id_map[p1_candidate] = 1
+                print(f"Identified Player 1 (Closest): Track ID {p1_candidate}")
+            
+        # Assign Player 2 (Farthest/Smallest) if not already assigned
+        if len(sorted_ids) >= 2:
+            p2_candidate = sorted_ids[1]
+            # Special check: If p2_candidate was assigned to P1 (because P1 is missing), don't overwrite
+            if 2 not in player_id_map.values() and p2_candidate not in player_id_map:
+                player_id_map[p2_candidate] = 2
+                print(f"Identified Player 2 (Farthest): Track ID {p2_candidate}")
     
     # Fallback: Map any other stray IDs to Player 1 to prevent crashes
     all_detected_ids = set(id_occupancy.keys())
@@ -604,7 +656,24 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     print(f"Total processing time: {elapsed_time:.2f} seconds")
     print(f"Processing speed: {len(output_video_frames)/elapsed_time:.2f} FPS")
 
-    return model_predictions_log
+    # --- CALCULATE FINAL POSITIONS FOR NEXT CLIP ---
+    final_positions = {}
+    if len(player_detections) > 0:
+        # Look at the last frame with detections
+        for i in range(len(player_detections) - 1, -1, -1):
+            if player_detections[i]:
+                last_frame_detections = player_detections[i]
+                for track_id, data in last_frame_detections.items():
+                    # Only save positions for mapped players
+                    if track_id in player_id_map:
+                        p_num = player_id_map[track_id]
+                        bbox = data['bbox']
+                        cx = (bbox[0] + bbox[2]) / 2
+                        cy = (bbox[1] + bbox[3]) / 2
+                        final_positions[p_num] = [cx, cy]
+                break
+
+    return model_predictions_log, final_positions
 
 if __name__ == "__main__":
     # Initialize the parser
@@ -642,6 +711,7 @@ if __name__ == "__main__":
 
     # 3. PROCESS CLIPS SEQUENTIALLY
     all_model_predictions = []
+    last_clip_positions = None
 
     # ONLY sort if we actually split the video (files match the pattern clip_X_Y)
     # If it's the original file (len=1), we skip sorting to avoid the ValueError.
@@ -679,7 +749,8 @@ if __name__ == "__main__":
             HDGCN_window_size=args.window_size,
             yolo_verbosity=args.yolo_verbosity,
             player_detection_court_margin=args.player_detection_court_margin,
-            frame_offset=frame_offset
+            frame_offset=frame_offset,
+            last_known_positions=last_clip_positions
         )
         
         # Aggregate stats
