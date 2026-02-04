@@ -352,6 +352,9 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     # MiniCourt
     mini_court = MiniCourt(raw_frames[0]) 
 
+    # Detect ball shots
+    ball_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
+
     # --- FIX: CONVERT POINTS TO BOXES ---
     # MiniCourt and Draw functions expect Bounding Boxes [x1, y1, x2, y2],
     # but our new Tracker returns Center Points (x, y).
