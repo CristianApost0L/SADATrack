@@ -743,7 +743,7 @@ if __name__ == "__main__":
         output_clip_path = os.path.join(processed_clip_dir, f"processed_{filename}")
 
         # Process the clip
-        clip_predictions = process_single_clip(
+        clip_preds_list, last_clip_positions = process_single_clip(
             input_video=clip_path,
             output_path=output_clip_path,
             HDGCN_window_size=args.window_size,
@@ -754,7 +754,7 @@ if __name__ == "__main__":
         )
         
         # Aggregate stats
-        all_model_predictions.extend(clip_predictions)
+        all_model_predictions.extend(clip_preds_list)
 
     # 4. FINAL REPORT & CLEANUP
     print("\n--- All Clips Processed. Generating Final Report ---")
