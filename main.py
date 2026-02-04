@@ -267,7 +267,7 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     # Scan for the first valid court keypoints
     for kpts in court_keypoints:
         # Check if kpts is valid list and has content
-        if kpts is not None and len(kpts) >= 4: # at least 2 points
+        if kpts and len(kpts) >= 4: # at least 2 points
              # Extract x and y (filter out 0s which might be missing points)
              xs = [x for x in kpts[0::2] if x > 1]
              ys = [y for y in kpts[1::2] if y > 1]
