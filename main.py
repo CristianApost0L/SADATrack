@@ -378,7 +378,7 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
                 print(f"Identified Player 2 (Farthest): Track ID {p2_candidate}")
     
     # Fallback: Map any other stray IDs to Player 1 to prevent crashes
-    all_detected_ids = set(final_scores.keys())
+    all_detected_ids = set(id_occupancy.keys())
     for pid in all_detected_ids:
         if pid not in player_id_map:
             player_id_map[pid] = 1
