@@ -8,6 +8,9 @@ data:
 # Model configuration
 model:
   yolo_path: 'models/yolo26x-pose.pt'
+  detector_path: 'models/yolo26x.pt'  # Path to YOLO detector for Smart Crop
+  courtside_path: 'Davidsv/CourtSide-Computer-Vision-v1' # Path/Name for CourtSide Racket Detector
+  smart_crop: true                  # Enable Smart Crop
   use_motionbert: true      # Enable MotionBERT lifting
   motionbert_path: 'models/MB_ft_h36m.pth' # Path to MotionBERT checkpoint (Download: https://1drv.ms/f/s!AvAdh0LSjEOlgSoTqtyR5Zsgi8_Z?e=rn4VJf)
 

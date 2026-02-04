@@ -141,6 +141,24 @@ def augment_3d_view_rotation(data, angle_range=30):
     return data
 
 
+def simulate_back_view(data):
+    """
+    Simulates a strict Back-View (180 degree rotation).
+    Useful to mitigate bias when training only on frontal data.
+    Transformation: (x, y, z) -> (-x, y, -z)
+    """
+    C, T, V = data.shape
+    if C < 3: return data
+    
+    # 180 degree rotation around Y-axis
+    # Equiv to x' = -x, z' = -z
+    data[0] = -data[0]
+    data[2] = -data[2]
+    
+    return data
+
+
+
 def _normalize_string(s):
     return s.lower().replace(" ", "").replace("_", "").replace("-", "")
 
@@ -554,7 +572,9 @@ def augment_skeleton(data,
                      apply_keypoint_dropout=True,
                      apply_pose_rotation=True,
                      apply_local_zoom=True,
-                     apply_confidence_jitter=True):
+                     apply_confidence_jitter=True,
+                     apply_back_view=True # New parameter
+                     ):
     """
     Comprehensive skeleton augmentation pipeline.
     
@@ -571,9 +591,15 @@ def augment_skeleton(data,
     if C < 2:
         return data
 
+    # 0. Back View Simulation (Solving the Frontal Bias)
+    # Applying this early to create a base "back view" sample
+    if C >= 3 and apply_back_view and np.random.random() < 0.5:
+        data = simulate_back_view(data)
+
     # 3D View Augmentation (Simulate Camera Angle) - Requires Z coordinate
     if C >= 3 and apply_pose_rotation and np.random.random() < 0.5:
         data = augment_3d_view_rotation(data, angle_range=rotation_range)
+
     
     # Temporal augmentations (should be applied first)
     if apply_temporal_crop and np.random.random() < 0.3:

@@ -60,7 +60,7 @@ def main(config_path, reuse_2d=False):
                     X_new = []
                     for i in tqdm(range(len(X_old)), desc="Lifting Sequences"):
                         sample_2d = X_old[i]
-                        kpts_3d = lifter.lift_2d_to_3d(sample_2d)
+                        kpts_3d = lifter.lift_2d_to_3d_coco(sample_2d)
                         
                         if sample_2d.shape[-1] >= 3:
                             conf = sample_2d[:, :, 2:3]
