@@ -15,9 +15,9 @@ class PlayerTracker:
         """
         1. Uses constraints to find players in Frame 0.
         2. Follows those IDs.
-        3. If a tracked ID disappears and a NEW ID appears nearby, it updates the 'chosen' list (Handover).
+        3. Only allows handover to a NEW ID if it matches the LOCATION *and* SIZE of the lost player.
         """
-        # Step 1: Initial Selection (Strict Geometric Constraints)
+        # Step 1: Initial Selection
         player_detections_first_frame = player_detections[0]
         chosen_players = self.choose_players(
             court_keypoints, 
@@ -28,15 +28,19 @@ class PlayerTracker:
         
         filtered_player_detections = []
         
-        # We maintain the last known position of our "Chosen" entities
-        # Format: { track_id: (center_x, center_y) }
-        active_player_positions = {}
+        # Track both POSITION and BOX SIZE (Height) to prevent switching to ball boys
+        # Format: { track_id: {'pos': (x,y), 'height': h, 'width': w} }
+        active_player_stats = {}
         
-        # Initialize positions from Frame 0
+        # Initialize stats from Frame 0
         for track_id in chosen_players:
             if track_id in player_detections_first_frame:
                 bbox = player_detections_first_frame[track_id]['bbox']
-                active_player_positions[track_id] = get_center_of_bbox(bbox)
+                active_player_stats[track_id] = {
+                    'pos': get_center_of_bbox(bbox),
+                    'height': bbox[3] - bbox[1],
+                    'width': bbox[2] - bbox[0]
+                }
 
         # Step 2: Process all frames
         for frame_idx, player_dict in enumerate(player_detections):
@@ -45,55 +49,78 @@ class PlayerTracker:
             # A. Check currently "Approved" IDs
             for track_id in chosen_players:
                 if track_id in player_dict:
-                    # Player found! Keep them and update position.
+                    # Player found! Update stats.
                     filtered_player_dict[track_id] = player_dict[track_id]
-                    active_player_positions[track_id] = get_center_of_bbox(player_dict[track_id]['bbox'])
+                    
+                    bbox = player_dict[track_id]['bbox']
+                    active_player_stats[track_id] = {
+                        'pos': get_center_of_bbox(bbox),
+                        'height': bbox[3] - bbox[1],
+                        'width': bbox[2] - bbox[0]
+                    }
             
-            # B. Handle Lost/Switched IDs (The "Handover" Logic)
-            # If we are missing a player, check if a "new" ID has taken their place
+            # B. Handle Lost IDs (Strict Handover)
             if len(filtered_player_dict) < len(chosen_players):
                 
-                # Identify which tracked player is missing in this frame
                 missing_ids = [pid for pid in chosen_players if pid not in filtered_player_dict]
-                
-                # Identify candidate "strangers" in the current frame (IDs we haven't approved yet)
                 strangers = [pid for pid in player_dict if pid not in chosen_players]
                 
                 for missing_id in missing_ids:
-                    # Get the last seen position of the missing player
-                    last_pos = active_player_positions.get(missing_id)
-                    if last_pos is None: continue
+                    last_stats = active_player_stats.get(missing_id)
+                    if last_stats is None: continue
                     
                     best_candidate = None
                     min_dist = float('inf')
                     
-                    # Search strangers for a match
+                    # Define Dynamic Thresholds based on the player's last known size
+                    # A player won't instantly teleport more than 2x their body width
+                    max_allowed_dist = max(100, last_stats['width'] * 5) 
+                    
                     for stranger_id in strangers:
-                        stranger_pos = get_center_of_bbox(player_dict[stranger_id]['bbox'])
-                        distance = measure_distance(last_pos, stranger_pos)
+                        bbox = player_dict[stranger_id]['bbox']
+                        stranger_pos = get_center_of_bbox(bbox)
+                        stranger_height = bbox[3] - bbox[1]
                         
-                        # Threshold: 100 pixels (Adjust if players move VERY fast)
-                        if distance < 100 and distance < min_dist:
+                        distance = measure_distance(last_stats['pos'], stranger_pos)
+                        
+                        # --- CONSTRAINT 1: DISTANCE ---
+                        if distance > max_allowed_dist:
+                            continue
+                            
+                        # --- CONSTRAINT 2: SIZE SIMILARITY (The Anti-Ballboy Fix) ---
+                        # Ball boys in the back are usually smaller (perspective) or crouching.
+                        # We only accept a new ID if its height is within 30% of the lost player.
+                        height_ratio = abs(stranger_height - last_stats['height']) / last_stats['height']
+                        
+                        # If the size difference is > 30%, it's likely a different person/object
+                        if height_ratio > 0.3:
+                            continue
+                            
+                        if distance < min_dist:
                             min_dist = distance
                             best_candidate = stranger_id
                     
-                    # If we found a match, UPDATE the chosen list
+                    # If we found a VALID candidate
                     if best_candidate is not None:
-                        # Remove old ID, Add new ID
+                        # Perform the Swap
                         chosen_players.remove(missing_id)
                         chosen_players.append(best_candidate)
                         
-                        # Add to filtered results immediately
                         filtered_player_dict[best_candidate] = player_dict[best_candidate]
-                        active_player_positions[best_candidate] = get_center_of_bbox(player_dict[best_candidate]['bbox'])
                         
-                        # Remove from strangers list so we don't double assign
+                        # Update stats
+                        bbox = player_dict[best_candidate]['bbox']
+                        active_player_stats[best_candidate] = {
+                            'pos': get_center_of_bbox(bbox),
+                            'height': bbox[3] - bbox[1],
+                            'width': bbox[2] - bbox[0]
+                        }
+                        
+                        # Remove from strangers list
                         strangers.remove(best_candidate)
+                        del active_player_stats[missing_id]
                         
-                        # Clean up old position memory
-                        del active_player_positions[missing_id]
-                        
-                        print(f"Frame {frame_idx}: ID Handover {missing_id} -> {best_candidate} (Dist: {min_dist:.1f}px)")
+                        print(f"Frame {frame_idx}: Handover {missing_id} -> {best_candidate} (Dist: {min_dist:.1f}px, Height Diff: {height_ratio:.2%})")
 
             filtered_player_detections.append(filtered_player_dict)
             
