@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import numpy as np
 import constants
-import importlib.util
 
 # Helper to manage imports
 def setup_import_env(repo_path):
@@ -26,21 +25,6 @@ def cleanup_conflicting_modules(modules_to_clear=['graph', 'graph.tools', 'model
             if mod == target or mod.startswith(target + '.'):
                 if mod in sys.modules:
                     del sys.modules[mod]
-
-# --- HELPER: Direct File Import ---
-def load_module_from_path(module_name, file_path):
-    """
-    Loads a python module directly from a file path, 
-    bypassing package requirements (missing __init__.py).
-    """
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    if spec is None:
-        raise ImportError(f"Could not load spec for {module_name} from {file_path}")
-    
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
 
 # --- Shared COCO 17 Definitions ---
 def get_groups_coco17_0based():
@@ -125,28 +109,22 @@ class HDGCN_Tennis(nn.Module):
     def __init__(self, num_classes, in_channels=3, drop_out=0, **kwargs):
         super(HDGCN_Tennis, self).__init__()
         
-        #1. SETUP PATHS
-        # The file is here:
-        hdgcn_path = '/kaggle/input/cv-auxiliary-repos/HD-GCN-main/model/HDGCN.py'
-        repo_root = '/kaggle/input/cv-auxiliary-repos/HD-GCN-main'
-
-        # We still need the repo root in sys.path so that HDGCN.py can import its own dependencies
-        # (like 'graph' or 'feeders' if it uses them internally)
-        if repo_root not in sys.path:
-            sys.path.insert(0, repo_root)
+        # 1. SETUP PATHS
+        # Point to the folder that CONTAINS the 'model' and 'graph' folders
+        setup_import_env(os.path.join(constants.PATH_FOR_AUXILIARY_DATASETS, 'HD-GCN-main'))
 
         # 2. CLEANUP
         cleanup_conflicting_modules()
 
         # 2. Import Official Model
         try:
-            OfficialHDGCN = load_module_from_path("OfficialHDGCN", hdgcn_path)
+            import model.HDGCN as OfficialHDGCN
             # Monkey patch
             OfficialHDGCN.get_groups = get_groups_coco17_1based
         except ImportError:
              # Retry with cleanup?
              cleanup_conflicting_modules()
-             OfficialHDGCN = load_module_from_path("OfficialHDGCN", hdgcn_path)
+             import model.HDGCN as OfficialHDGCN
              OfficialHDGCN.get_groups = get_groups_coco17_1based
 
         graph_args = {'CoM': 11, 'labeling_mode': 'spatial'}
