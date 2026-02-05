@@ -5,7 +5,7 @@ import sys
 
 # Add MotionBERT root to sys.path to allow imports from lib.*
 # Current file is in src/, MotionBERT is in MotionBERT-main/ relative to project root
-MOTIONBERT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'MotionBERT-main'))
+MOTIONBERT_ROOT = '/kaggle/input/cv-auxiliary-repos/MotionBERT-main'
 if MOTIONBERT_ROOT not in sys.path:
     sys.path.append(MOTIONBERT_ROOT)
 

@@ -23,6 +23,8 @@ FRAME_LIMIT_FOR_SERVES = 40 # From frames 0-40 we will allow serves, from frame 
 
 BATCH_SIZE = 12
 
+PATH_FOR_AUXILIARY_DATASETS = '/kaggle/input/cv-auxiliary-repos'
+
 TEMP_CLIP_DIR = "/kaggle/working/temp_processing_clips"
 PROCESSED_CLIP_DIR = "/kaggle/working/output_videos/clips"
 CLIP_DURATION = 180 #seconds

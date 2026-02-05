@@ -3,6 +3,7 @@ import os
 import torch
 import torch.nn as nn
 import numpy as np
+import constants
 
 # Helper to manage imports
 def setup_import_env(repo_rel_path):
@@ -103,7 +104,7 @@ class HDGCN_Tennis(nn.Module):
         super(HDGCN_Tennis, self).__init__()
         
         # 1. Setup Environment
-        setup_import_env(os.path.join('HD-GCN-main', 'HD-GCN-main'))
+        setup_import_env(os.path.join(constants.PATH_FOR_AUXILIARY_DATASETS, 'HD-GCN-main'))
         # We don't necessarily clear modules if we are not switching, but let's be safe if we are
         # cleanup_conflicting_modules() # Use with caution
         
@@ -164,7 +165,8 @@ class CTRGCN_Tennis(nn.Module):
         super(CTRGCN_Tennis, self).__init__()
         
         # 1. Setup Environment
-        setup_import_env(os.path.join('CTR-GCN-main', 'CTR-GCN-main'))
+        
+        setup_import_env(os.path.join(constants.PATH_FOR_AUXILIARY_DATASETS, 'CTR-GCN-main'))
         
         # 2. Import Official Model
         # We MUST clear at least 'graph' because GraphCTR uses 'graph.tools.get_spatial_graph' 

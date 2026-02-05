@@ -1,9 +1,21 @@
 import torch
 import numpy as np
-import os
+import os, sys
+import constants
+
+mb_path = os.path.join(constants.PATH_FOR_AUXILIARY_DATASETS, 'MotionBERT-main')
+if mb_path not in sys.path:
+    sys.path.append(mb_path)
+
+# 2. Add CTR-GCN path
+ctr_path = os.path.join(constants.PATH_FOR_AUXILIARY_DATASETS, 'CTR-GCN-main')
+if ctr_path not in sys.path:
+    sys.path.append(ctr_path)
+
 from .model import CTRGCN_Tennis
 from .dataset import COCO_BONE_PAIRS
 from .motionbert_extractor import MotionBERTExtractor
+
 
 class Tennis3DSystem:
     def __init__(self, joint_weights, bone_weights, motionbert_weights, device='cuda'):
