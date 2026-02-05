@@ -18,7 +18,7 @@ def main():
         # --- PATHS ---
         # Double check these exist in your kaggle input
         player_model_path = '/kaggle/input/cv-project/yolo26x.pt'
-        court_model_path = "models/keypoints_model.pth" 
+        court_model_path = "/kaggle/input/cv-project/keypoints_model.pth" 
 
         print(f"DEBUG: Starting processing for {args.path}")
         print(f"DEBUG: Using Player Model: {player_model_path}")
