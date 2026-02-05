@@ -785,7 +785,7 @@ if __name__ == "__main__":
     if not os.path.exists(final_output_dir):
         os.makedirs(final_output_dir)
 
-    original_filename = os.path.basename(args.input_path)
+    original_filename = os.path.basename(args.path)
     final_output_path = os.path.join(final_output_dir, original_filename)
 
     merge_clips(processed_files_list, final_output_path)
