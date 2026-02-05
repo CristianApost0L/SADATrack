@@ -200,7 +200,7 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
         os.makedirs(json_output_path, exist_ok=True)
         
         filename_with_ext = os.path.basename(original_video_name)
-        file_root = os.path.splitext(filename_with_ext)[0]  
+        file_root = filename_with_ext[0]  
 
         json_output_path = os.path.join(json_output_path, f"{file_root}_detections.json")
         
