@@ -199,8 +199,11 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
         json_output_path = "kaggle/working/detections"
         os.makedirs(json_output_path, exist_ok=True)
         
-        json_output_path = json_output_path + original_video_name + "_detections.json"
+        filename_with_ext = os.path.basename(original_video_name)
+        file_root = os.path.splitext(filename_with_ext)[0]  
 
+        json_output_path = os.path.join(json_output_path, f"{file_root}_detections.json")
+        
         with open(json_output_path, 'w') as f:
             json.dump(export_data, f, cls=NumpyEncoder, indent=4)
         print(f"   📄 Saved detection log to {json_output_path}")
