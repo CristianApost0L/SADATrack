@@ -40,7 +40,7 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.tolist()
         return super(NumpyEncoder, self).default(obj)
 
-def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbosity, player_detection_court_margin, frame_offset=0, last_known_positions=None):
+def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbosity, player_detection_court_margin, original_video_name, frame_offset=0, last_known_positions=None):
     start_time = time.time()
 
     model_predictions_log = []
@@ -196,8 +196,11 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
             export_data[i] = frame_boxes
 
         # Save JSON alongside the output video path
-        json_output_path = os.path.splitext(output_path)[0] + "_detections.json"
+        json_output_path = "kaggle/working/detections"
+        os.makedirs(json_output_path, exist_ok=True)
         
+        json_output_path = json_output_path + original_video_name + "_detections.json"
+
         with open(json_output_path, 'w') as f:
             json.dump(export_data, f, cls=NumpyEncoder, indent=4)
         print(f"   📄 Saved detection log to {json_output_path}")
@@ -787,6 +790,9 @@ if __name__ == "__main__":
 
         processed_files_list.append(output_clip_path)
 
+        original_file = os.path.basename(args.path)
+        original_video_name = os.path.splitext(original_file)
+
         # Process the clip
         clip_preds_list, last_clip_positions = process_single_clip(
             input_video=clip_path,
@@ -794,6 +800,7 @@ if __name__ == "__main__":
             HDGCN_window_size=args.window_size,
             yolo_verbosity=args.yolo_verbosity,
             player_detection_court_margin=args.player_detection_court_margin,
+            original_video_name=original_video_name
             frame_offset=frame_offset,
             last_known_positions=last_clip_positions
         )
