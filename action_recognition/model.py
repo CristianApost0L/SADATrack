@@ -6,11 +6,17 @@ import numpy as np
 import constants
 
 # Helper to manage imports
-def setup_import_env(repo_rel_path):
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    repo_path = os.path.join(current_dir, '..', repo_rel_path)
+def setup_import_env(repo_path):
+    """
+    Adds an absolute path to sys.path so we can import modules from it.
+    """
+    if not os.path.exists(repo_path):
+        print(f"WARNING: The path '{repo_path}' does not exist!")
+    
+    # Add to the TOP of sys.path to ensure priority
     if repo_path not in sys.path:
         sys.path.insert(0, repo_path)
+        
     return repo_path
 
 def cleanup_conflicting_modules(modules_to_clear=['graph', 'graph.tools', 'model']):
