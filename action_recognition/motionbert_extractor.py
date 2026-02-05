@@ -285,7 +285,7 @@ class MotionBERTIntegratedExtractor:
     Integrates YOLO (via PoseExtractor) + MotionBERT Lifting.
     """
     def __init__(self, yolo_path, motionbert_ckpt, device='cuda'):
-        from src.extractor import PoseExtractor
+        from action_recognition.extractor import PoseExtractor
         
         self.pose_extractor = PoseExtractor(model_path=yolo_path, device=device)
         self.lifter = MotionBERTExtractor(checkpoint_path=motionbert_ckpt, device=device)
