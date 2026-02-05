@@ -30,6 +30,15 @@ import json
 import shutil
 from ultralytics import YOLO 
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NumpyEncoder, self).default(obj)
 
 def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbosity, player_detection_court_margin, frame_offset=0, last_known_positions=None):
     start_time = time.time()
@@ -173,6 +182,27 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
         player_detection_court_margin=player_detection_court_margin,
         last_known_positions=last_known_positions 
     )
+
+    try:
+        export_data = {}
+        for i, frame_detections in enumerate(player_detections):
+            frame_boxes = []
+            for track_id, data in frame_detections.items():
+                # data['bbox'] is [x1, y1, x2, y2]
+                frame_boxes.append({
+                    "track_id": track_id,
+                    "bbox": data['bbox']
+                })
+            export_data[i] = frame_boxes
+
+        # Save JSON alongside the output video path
+        json_output_path = os.path.splitext(output_path)[0] + "_detections.json"
+        
+        with open(json_output_path, 'w') as f:
+            json.dump(export_data, f, cls=NumpyEncoder, indent=4)
+        print(f"   📄 Saved detection log to {json_output_path}")
+    except Exception as e:
+        print(f"   ⚠️ Could not save detection JSON: {e}")
 
     pose_estimator = YOLO('/kaggle/input/cv-project/yolo26x-pose.pt')
 
