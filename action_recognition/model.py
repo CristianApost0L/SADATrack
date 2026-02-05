@@ -26,6 +26,55 @@ def cleanup_conflicting_modules(modules_to_clear=['graph', 'graph.tools', 'model
                 if mod in sys.modules:
                     del sys.modules[mod]
 
+def setup_explicit_path():
+    """
+    Hardcoded setup based on your confirmed path:
+    /kaggle/input/cv-auxiliary-repos/HD-GCN-main/model/HDGCN.py
+    """
+    # The file we want to import is 'model/HDGCN.py'
+    # So we need to add the PARENT of the 'model' folder to sys.path.
+    target_file = '/kaggle/input/cv-auxiliary-repos/HD-GCN-main/model/HDGCN.py'
+    repo_root = '/kaggle/input/cv-auxiliary-repos/HD-GCN-main'
+    
+    print(f"\n[DEBUG] ------------------------------------------------")
+    print(f"[DEBUG] Target HDGCN file: {target_file}")
+    
+    if os.path.exists(target_file):
+        print("[DEBUG] STATUS: Target file EXISTS.")
+        
+        # Check repo root content
+        if os.path.exists(repo_root):
+            print(f"[DEBUG] Repo Root: {repo_root}")
+            print(f"[DEBUG] Repo Contents: {os.listdir(repo_root)}")
+            
+            # Check model folder content
+            model_dir = os.path.join(repo_root, 'model')
+            if os.path.exists(model_dir):
+                print(f"[DEBUG] 'model' folder found. Contents: {os.listdir(model_dir)}")
+            else:
+                print(f"[DEBUG] CRITICAL: 'model' folder NOT found in {repo_root}")
+        
+        # Add to sys.path
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+            print(f"[DEBUG] ACTION: Added {repo_root} to sys.path[0]")
+        else:
+            print(f"[DEBUG] ACTION: {repo_root} was already in sys.path")
+            
+    else:
+        print("[DEBUG] STATUS: Target file NOT FOUND!")
+        print(f"[DEBUG] Checking parent: {os.path.dirname(target_file)}")
+        # List the auxiliary repo root to see what's actually there
+        aux_root = '/kaggle/input/cv-auxiliary-repos'
+        if os.path.exists(aux_root):
+            print(f"[DEBUG] Listing {aux_root}:")
+            for item in os.listdir(aux_root):
+                print(f"  - {item}")
+        else:
+            print(f"[DEBUG] {aux_root} does not exist.")
+
+    print(f"[DEBUG] ------------------------------------------------\n")
+
 # --- Shared COCO 17 Definitions ---
 def get_groups_coco17_0based():
     groups = []
@@ -109,10 +158,11 @@ class HDGCN_Tennis(nn.Module):
     def __init__(self, num_classes, in_channels=3, drop_out=0, **kwargs):
         super(HDGCN_Tennis, self).__init__()
         
-        # 1. Setup Environment
-        setup_import_env(os.path.join(constants.PATH_FOR_AUXILIARY_DATASETS, 'HD-GCN-main'))
-        # We don't necessarily clear modules if we are not switching, but let's be safe if we are
-        # cleanup_conflicting_modules() # Use with caution
+        # 1. SETUP PATHS
+        setup_explicit_path()
+
+        # 2. CLEANUP
+        cleanup_conflicting_modules()
         
         # 2. Import Official Model
         try:
