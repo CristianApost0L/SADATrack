@@ -13,7 +13,7 @@ if ctr_path not in sys.path:
     sys.path.append(ctr_path)
 
 from .model import HDGCN_Tennis
-from .dataset import COCO_BONE_PAIRS
+from .dataset import COCO_BONE_PAIRS, normalize_skeleton
 from .motionbert_extractor import MotionBERTExtractor
 
 
@@ -58,23 +58,31 @@ class Tennis3DSystem:
         # 2. Concatenate: (40, 17, 3) + (40, 17, 1) -> (40, 17, 4)
         kpts_combined = np.concatenate([kpts_3d, conf_channel], axis=2)
 
+        # --- B. NORMALIZE (THE MISSING STEP) ---
+        # We must align the skeleton (center hips, rotate view) just like in training.
+        # normalize_skeleton expects (T, V, C) or (C, T, V) and returns (C, T, V)
+        kpts_norm = normalize_skeleton(kpts_combined) # Returns (4, 40, 17)
+
         # 3. Prepare for Pytorch: (Batch, Channel, Time, Vertex, Person)
         # Shape: (1, 4, 40, 17, 1)
         data_joint = torch.tensor(kpts_combined, dtype=torch.float32).to(self.device)
         data_joint = data_joint.permute(2, 0, 1).unsqueeze(0).unsqueeze(-1)
 
-        # --- C. CREATE BONE DATA ---
-        # Calculate bone vectors from the joint data
+        # --- C. PREPARE TENSOR ---
+        # Shape needed: (Batch, Channel, Time, Vertex, Person) -> (1, 4, 40, 17, 1)
+        data_joint = torch.tensor(kpts_norm, dtype=torch.float32).to(self.device)
+        data_joint = data_joint.unsqueeze(0).unsqueeze(-1) # Add Batch and Person dims
+
+        # --- D. CREATE BONE DATA ---
         data_bone = torch.zeros_like(data_joint)
         for v1, v2 in COCO_BONE_PAIRS:
             data_bone[:, :, :, v1, :] = data_joint[:, :, :, v1, :] - data_joint[:, :, :, v2, :]
 
-        # --- D. INFERENCE ---
+        # --- E. INFERENCE ---
         with torch.no_grad():
             output_joint = self.model_joint(data_joint)
             output_bone = self.model_bone(data_bone)
 
-            # Ensemble: Average the predictions
             final_output = (output_joint + output_bone) / 2
             probs = torch.softmax(final_output, dim=1)
 
