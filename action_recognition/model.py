@@ -125,7 +125,7 @@ class HDGCN_Tennis(nn.Module):
             num_class=num_classes,
             num_point=17,
             num_person=1,
-            graph='src.model.GraphHD',
+            graph='action_recognition.model.GraphHD',
             graph_args=graph_args,
             in_channels=in_channels,
             drop_out=drop_out
@@ -180,7 +180,7 @@ class CTRGCN_Tennis(nn.Module):
             num_class=num_classes,
             num_point=17,
             num_person=1,
-            graph='src.model.GraphCTR',
+            graph='action_recognition.model.GraphCTR',
             graph_args=graph_args,
             in_channels=in_channels,
             drop_out=drop_out,
