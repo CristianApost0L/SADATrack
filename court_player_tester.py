@@ -37,7 +37,7 @@ def main():
         # 3. Detect Players
         print(f"   🏃 Detecting Players...")
         player_tracker = PlayerTracker(model_path=player_model_path)
-        player_detections = player_tracker.detect_frames(video_frames, read_from_stub=False)
+        player_detections = player_tracker.detect_frames(video_frames)
 
         # 4. Filter Players
         print("   🛡️  Filtering Players...")
