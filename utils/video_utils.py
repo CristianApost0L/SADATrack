@@ -172,7 +172,7 @@ def enhance_video_contrast(frames):
         
     return enhanced_frames
 
-def split_video_into_clips(video_path, output_dir, clip_duration=60):
+def split_video_into_clips(video_path, output_dir, clip_duration=180):
     """
     Splits a video into clips of a specified duration with start-frame naming.
     
