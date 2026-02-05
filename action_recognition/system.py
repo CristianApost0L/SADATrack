@@ -12,7 +12,7 @@ ctr_path = os.path.join(constants.PATH_FOR_AUXILIARY_DATASETS, 'CTR-GCN-main')
 if ctr_path not in sys.path:
     sys.path.append(ctr_path)
 
-from .model import HDGCN_Tennis
+from .model import CTRGCN_Tennis
 from .dataset import COCO_BONE_PAIRS, normalize_skeleton
 from .motionbert_extractor import MotionBERTExtractor
 
@@ -28,13 +28,13 @@ class Tennis3DSystem:
         # 2. Initialize Joint Model (HDGCN)
         # Note: in_channels=4 because your weights expect (X, Y, Z, Confidence)
         print(f"Loading HDGCN Joint Model from {joint_weights}...")
-        self.model_joint = HDGCN_Tennis(num_classes=12, in_channels=4) 
+        self.model_joint = CTRGCN_Tennis(num_classes=12, in_channels=4) 
         self.model_joint.load_state_dict(torch.load(joint_weights, map_location=device))
         self.model_joint.to(device).eval()
 
         # 3. Initialize Bone Model (HDGCN)
         print(f"Loading HDGCN Bone Model from {bone_weights}...")
-        self.model_bone = HDGCN_Tennis(num_classes=12, in_channels=4)
+        self.model_bone = CTRGCN_Tennis(num_classes=12, in_channels=4)
         self.model_bone.load_state_dict(torch.load(bone_weights, map_location=device))
         self.model_bone.to(device).eval()
 
