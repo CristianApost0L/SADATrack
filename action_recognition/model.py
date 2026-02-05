@@ -149,7 +149,7 @@ class HDGCN_Tennis(nn.Module):
         return self.model(x)
 
 # --- CTR-GCN ---
-
+'''
 class GraphCTR:
     def __init__(self, labeling_mode='spatial'):
         self.num_node = 17
@@ -205,3 +205,4 @@ class CTRGCN_Tennis(nn.Module):
             x = x[:, :self.in_channels, :, :, :]
             
         return self.model(x)
+'''
