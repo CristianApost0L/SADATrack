@@ -32,7 +32,12 @@ def main():
         # 2. Detect Court
         print("   🎾 Detecting Court Lines...")
         court_detector = CourtLineDetector(court_model_path)
-        court_keypoints = court_detector.predict(video_frames[0])
+        # FIX: Get the prediction for the first frame...
+        first_frame_lines = court_detector.predict(video_frames[0])
+        
+        # ...and repeat it for ALL frames in the video list so 'draw_keypoints' is happy
+        court_keypoints = [first_frame_lines for _ in video_frames]
+
 
         # 3. Detect Players
         print(f"   🏃 Detecting Players...")
