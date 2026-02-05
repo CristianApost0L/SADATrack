@@ -3,20 +3,13 @@ import os
 import torch
 import torch.nn as nn
 import numpy as np
-import constants
 
 # Helper to manage imports
-def setup_import_env(repo_path):
-    """
-    Adds an absolute path to sys.path so we can import modules from it.
-    """
-    if not os.path.exists(repo_path):
-        print(f"WARNING: The path '{repo_path}' does not exist!")
-    
-    # Add to the TOP of sys.path to ensure priority
+def setup_import_env(repo_rel_path):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_path = os.path.join(current_dir, '..', repo_rel_path)
     if repo_path not in sys.path:
         sys.path.insert(0, repo_path)
-        
     return repo_path
 
 def cleanup_conflicting_modules(modules_to_clear=['graph', 'graph.tools', 'model']):
@@ -109,13 +102,11 @@ class HDGCN_Tennis(nn.Module):
     def __init__(self, num_classes, in_channels=3, drop_out=0, **kwargs):
         super(HDGCN_Tennis, self).__init__()
         
-        # 1. SETUP PATHS
-        # Point to the folder that CONTAINS the 'model' and 'graph' folders
+        # 1. Setup Environment
         setup_import_env(os.path.join(constants.PATH_FOR_AUXILIARY_DATASETS, 'HD-GCN-main'))
-
-        # 2. CLEANUP
-        cleanup_conflicting_modules()
-
+        # We don't necessarily clear modules if we are not switching, but let's be safe if we are
+        # cleanup_conflicting_modules() # Use with caution
+        
         # 2. Import Official Model
         try:
             import model.HDGCN as OfficialHDGCN
@@ -134,7 +125,7 @@ class HDGCN_Tennis(nn.Module):
             num_class=num_classes,
             num_point=17,
             num_person=1,
-            graph='action_recognition.model.GraphHD',
+            graph='src.model.GraphHD',
             graph_args=graph_args,
             in_channels=in_channels,
             drop_out=drop_out
@@ -151,7 +142,7 @@ class HDGCN_Tennis(nn.Module):
         return self.model(x)
 
 # --- CTR-GCN ---
-'''
+
 class GraphCTR:
     def __init__(self, labeling_mode='spatial'):
         self.num_node = 17
@@ -173,7 +164,6 @@ class CTRGCN_Tennis(nn.Module):
         super(CTRGCN_Tennis, self).__init__()
         
         # 1. Setup Environment
-        
         setup_import_env(os.path.join(constants.PATH_FOR_AUXILIARY_DATASETS, 'CTR-GCN-main'))
         
         # 2. Import Official Model
@@ -190,7 +180,7 @@ class CTRGCN_Tennis(nn.Module):
             num_class=num_classes,
             num_point=17,
             num_person=1,
-            graph='action_recognition.model.GraphCTR',
+            graph='src.model.GraphCTR',
             graph_args=graph_args,
             in_channels=in_channels,
             drop_out=drop_out,
@@ -207,4 +197,3 @@ class CTRGCN_Tennis(nn.Module):
             x = x[:, :self.in_channels, :, :, :]
             
         return self.model(x)
-'''
