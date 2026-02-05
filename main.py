@@ -800,7 +800,7 @@ if __name__ == "__main__":
             HDGCN_window_size=args.window_size,
             yolo_verbosity=args.yolo_verbosity,
             player_detection_court_margin=args.player_detection_court_margin,
-            original_video_name=original_video_name
+            original_video_name=original_video_name,
             frame_offset=frame_offset,
             last_known_positions=last_clip_positions
         )
