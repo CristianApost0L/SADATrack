@@ -124,7 +124,7 @@ class HDGCN_Tennis(nn.Module):
     def __init__(self, num_classes, in_channels=3, drop_out=0, **kwargs):
         super(HDGCN_Tennis, self).__init__()
         
-        1. SETUP PATHS
+        #1. SETUP PATHS
         # The file is here:
         hdgcn_path = '/kaggle/input/cv-auxiliary-repos/HD-GCN-main/model/HDGCN.py'
         repo_root = '/kaggle/input/cv-auxiliary-repos/HD-GCN-main'
