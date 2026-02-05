@@ -12,91 +12,13 @@ class PlayerTracker:
         self.model = YOLO(model_path)
 
     def choose_and_filter_players(self, court_keypoints, player_detections, player_detection_court_margin, last_known_positions=None):
-        """
-        1. Uses constraints to find players in Frame 0.
-        2. Follows those IDs.
-        3. If a tracked ID disappears and a NEW ID appears nearby, it updates the 'chosen' list (Handover).
-        """
-        # Step 1: Initial Selection (Strict Geometric Constraints)
         player_detections_first_frame = player_detections[0]
-        chosen_players = self.choose_players(
-            court_keypoints, 
-            player_detections_first_frame, 
-            player_detection_court_margin, 
-            last_known_positions
-        )
-        
+        chosen_player = self.choose_players(court_keypoints, player_detections_first_frame, player_detection_court_margin, last_known_positions)
         filtered_player_detections = []
-        
-        # We maintain the last known position of our "Chosen" entities
-        # Format: { track_id: (center_x, center_y) }
-        active_player_positions = {}
-        
-        # Initialize positions from Frame 0
-        for track_id in chosen_players:
-            if track_id in player_detections_first_frame:
-                bbox = player_detections_first_frame[track_id]['bbox']
-                active_player_positions[track_id] = get_center_of_bbox(bbox)
-
-        # Step 2: Process all frames
-        for frame_idx, player_dict in enumerate(player_detections):
-            filtered_player_dict = {}
-            
-            # A. Check currently "Approved" IDs
-            for track_id in chosen_players:
-                if track_id in player_dict:
-                    # Player found! Keep them and update position.
-                    filtered_player_dict[track_id] = player_dict[track_id]
-                    active_player_positions[track_id] = get_center_of_bbox(player_dict[track_id]['bbox'])
-            
-            # B. Handle Lost/Switched IDs (The "Handover" Logic)
-            # If we are missing a player, check if a "new" ID has taken their place
-            if len(filtered_player_dict) < len(chosen_players):
-                
-                # Identify which tracked player is missing in this frame
-                missing_ids = [pid for pid in chosen_players if pid not in filtered_player_dict]
-                
-                # Identify candidate "strangers" in the current frame (IDs we haven't approved yet)
-                strangers = [pid for pid in player_dict if pid not in chosen_players]
-                
-                for missing_id in missing_ids:
-                    # Get the last seen position of the missing player
-                    last_pos = active_player_positions.get(missing_id)
-                    if last_pos is None: continue
-                    
-                    best_candidate = None
-                    min_dist = float('inf')
-                    
-                    # Search strangers for a match
-                    for stranger_id in strangers:
-                        stranger_pos = get_center_of_bbox(player_dict[stranger_id]['bbox'])
-                        distance = measure_distance(last_pos, stranger_pos)
-                        
-                        # Threshold: 100 pixels (Adjust if players move VERY fast)
-                        if distance < 100 and distance < min_dist:
-                            min_dist = distance
-                            best_candidate = stranger_id
-                    
-                    # If we found a match, UPDATE the chosen list
-                    if best_candidate is not None:
-                        # Remove old ID, Add new ID
-                        chosen_players.remove(missing_id)
-                        chosen_players.append(best_candidate)
-                        
-                        # Add to filtered results immediately
-                        filtered_player_dict[best_candidate] = player_dict[best_candidate]
-                        active_player_positions[best_candidate] = get_center_of_bbox(player_dict[best_candidate]['bbox'])
-                        
-                        # Remove from strangers list so we don't double assign
-                        strangers.remove(best_candidate)
-                        
-                        # Clean up old position memory
-                        del active_player_positions[missing_id]
-                        
-                        print(f"Frame {frame_idx}: ID Handover {missing_id} -> {best_candidate} (Dist: {min_dist:.1f}px)")
-
+        for player_dict in player_detections:
+            # Preserve the whole data object (bbox + keypoints) for chosen players
+            filtered_player_dict = {track_id: player_data for track_id, player_data in player_dict.items() if track_id in chosen_player}
             filtered_player_detections.append(filtered_player_dict)
-            
         return filtered_player_detections
 
     def choose_players(self, court_keypoints, player_dict, player_detection_court_margin, last_known_positions=None):
