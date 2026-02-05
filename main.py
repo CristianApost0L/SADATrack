@@ -688,7 +688,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process a video file from a specific path using a specific window size and YOLO verbosity.")
     
     # Add the path argument
-    parser.add_argument("--path", type=str, default = "input_videos/input_video.mp4", help="The full path to the video file", required=True)
+    parser.add_argument("--input-path", type=str, default = "/kaggle/input/tennis-rally-videos/input_video.mp4", help="The full path to the video file", required=True)
+
+    parser.add_argument("--output-path", type=str, default = "/kaggle/working/output_videos", help="The full path to the output", required=False)
 
     parser.add_argument("--window-size", type=int, default = 40, help="The HDGCN shot recognition window size", required=True)
 
@@ -777,11 +779,14 @@ if __name__ == "__main__":
     
     # MERGE LOGIC
     print("\n--- Merging Processed Clips ---")
-    final_output_path = "/kaggle/working/output_videos/input_video.mp4"
+    final_output_dir = args.output_path
     
     # Ensure the folder exists
-    if not os.path.exists("output_videos"):
-        os.makedirs("output_videos")
+    if not os.path.exists(final_output_dir):
+        os.makedirs(final_output_dir)
+
+    original_filename = os.path.basename(args.input_path)
+    final_output_path = os.path.join(final_output_dir, original_filename)
 
     merge_clips(processed_files_list, final_output_path)
     
