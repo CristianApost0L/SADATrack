@@ -27,13 +27,13 @@ class Tennis3DSystem:
 
         # 2. Initialize Joint Model (HDGCN)
         # Note: in_channels=4 because your weights expect (X, Y, Z, Confidence)
-        print(f"Loading HDGCN Joint Model from {joint_weights}...")
+        print(f"Loading Joint Model from {joint_weights}...")
         self.model_joint = CTRGCN_Tennis(num_classes=12, in_channels=4) 
         self.model_joint.load_state_dict(torch.load(joint_weights, map_location=device))
         self.model_joint.to(device).eval()
 
         # 3. Initialize Bone Model (HDGCN)
-        print(f"Loading HDGCN Bone Model from {bone_weights}...")
+        print(f"Loading Bone Model from {bone_weights}...")
         self.model_bone = CTRGCN_Tennis(num_classes=12, in_channels=4)
         self.model_bone.load_state_dict(torch.load(bone_weights, map_location=device))
         self.model_bone.to(device).eval()
@@ -46,13 +46,11 @@ class Tennis3DSystem:
         # --- A. LIFT TO 3D (H36M FORMAT) ---
         # "Just like the original": We use the native method first.
         # This returns the raw MotionBERT output (H36M Topology)
-        kpts_3d_h36m = self.lifter.lift_2d_to_3d(kpts_2d_sequence)
+        kpts_3d_coco = self.lifter.lift_2d_to_3d_coco(kpts_2d_sequence)
 
-        # --- B. CONVERT TO COCO ---
-        # CRITICAL: Your GCN is trained on COCO. 
-        # If we skip this, the GCN will connect "Hips" thinking they are "Shoulders".
-        # We manually call the converter here.
-        kpts_3d_coco = self.lifter._h36m_to_coco(kpts_3d_h36m, original_coco=kpts_2d_sequence)
+        # DEBUG: Check if lifting actually worked
+        if np.all(kpts_3d_coco == 0):
+            print("[WARNING] MotionBERT returned all zeros! Input data might be invalid.")
 
         # --- C. MERGE CHANNELS ---
         conf_channel = kpts_2d_sequence[:, :, 2:3]
