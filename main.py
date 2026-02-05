@@ -20,7 +20,7 @@ import cv2
 import pandas as pd
 import numpy as np
 from copy import deepcopy
-from action_recognition.model import CTRGCN_Tennis
+from action_recognition.model import HDGCN_Tennis
 from action_recognition.extractor import PoseExtractor
 from action_recognition.dataset import COCO_BONE_PAIRS
 from action_recognition.system import Tennis3DSystem
