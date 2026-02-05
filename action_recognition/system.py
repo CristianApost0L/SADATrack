@@ -46,7 +46,7 @@ class Tennis3DSystem:
         # --- A. LIFT TO 3D ---
         # MotionBERT takes 2D and gives us 3D positions (X, Y, Z)
         # Output shape: (40, 17, 3)
-        kpts_3d = self.lifter.lift_sequence(kpts_2d_sequence) 
+        kpts_3d = self.lifter.lift_2d_to_3d_coco(kpts_2d_sequence) 
 
         # --- B. COMBINE CHANNELS (The Critical Fix) ---
         # Your HDGCN weights expect 4 channels: (X, Y, Z, Confidence).
