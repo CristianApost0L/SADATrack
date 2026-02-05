@@ -58,6 +58,11 @@ class Tennis3DSystem:
         # 2. Concatenate: (40, 17, 3) + (40, 17, 1) -> (40, 17, 4)
         kpts_combined = np.concatenate([kpts_3d, conf_channel], axis=2)
 
+        # --- C. FIX Z-AXIS & NORMALIZE ---
+        # 1. Invert Z-axis: Fixes "Back View" confusion (Forehand -> Backhand error)
+        # This aligns MotionBERT's coordinate system with the Training Normalization logic
+        kpts_combined[:, :, 2] = -kpts_combined[:, :, 2]
+
         # --- B. NORMALIZE (THE MISSING STEP) ---
         # We must align the skeleton (center hips, rotate view) just like in training.
         # normalize_skeleton expects (T, V, C) or (C, T, V) and returns (C, T, V)
