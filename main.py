@@ -40,7 +40,7 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.tolist()
         return super(NumpyEncoder, self).default(obj)
 
-def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbosity, player_detection_court_margin, original_video_name, frame_offset=0, last_known_positions=None):
+def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbosity, player_detection_court_margin, original_video_name, p1_handedness, p2_handedness, frame_offset=0, last_known_positions=None):
     start_time = time.time()
 
     model_predictions_log = []
@@ -568,6 +568,50 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
                         # Set logit to negative infinity so argmax never picks it
                         output[0][idx] = -float('inf')
 
+            # RIGHTY/LEFTY MASK
+            # 1. Determine current shooter's handedness
+            shooter_hand = p1_handedness if mapped_shooter_id == 1 else p2_handedness
+
+            # 2. Get positions (Center X)
+            p_bbox = player_detections[start_frame][player_shot_ball]['bbox']
+            p_center_x = (p_bbox[0] + p_bbox[2]) / 2
+
+            b_box = ball_detections[start_frame][1]
+            b_center_x = (b_box[0] + b_box[2]) / 2
+
+            # 3. Determine if ball is on the "Forehand Side" geometrically
+            # Note: P1 (Bottom) faces UP (North). P2 (Top) faces DOWN (South).
+            is_forehand_side = False
+
+            if mapped_shooter_id == 1: # Bottom Player (Faces Away/Up)
+                if shooter_hand == 'right':
+                    # Righty facing up: Ball on Right (Screen X > Player X) is Forehand
+                    if b_center_x > p_center_x: is_forehand_side = True
+                else: 
+                    # Lefty facing up: Ball on Left (Screen X < Player X) is Forehand
+                    if b_center_x < p_center_x: is_forehand_side = True
+
+            else: # Top Player (Faces Camera/Down)
+                if shooter_hand == 'right':
+                    # Righty facing down: Ball on Screen LEFT is their Right side (Forehand)
+                    if b_center_x < p_center_x: is_forehand_side = True
+                else:
+                    # Lefty facing down: Ball on Screen RIGHT is their Left side (Forehand)
+                    if b_center_x > p_center_x: is_forehand_side = True
+
+            # 4. Apply Mask
+            if is_forehand_side:
+                # If geometry says Forehand, ban Backhand classes
+                for idx, class_name in enumerate(constants.THETIS_CLASSES):
+                    if "backhand" in class_name:
+                         output[0][idx] = -float('inf')
+            else:
+                # If geometry says Backhand, ban Forehand classes
+                for idx, class_name in enumerate(constants.THETIS_CLASSES):
+                    if "forehand" in class_name:
+                         output[0][idx] = -float('inf')
+            # -----------------------------
+
             prediction_idx = torch.argmax(output, dim=1).item()
             shot_name = constants.THETIS_CLASSES[prediction_idx]
 
@@ -745,6 +789,9 @@ if __name__ == "__main__":
 
     parser.add_argument("--player-detection-court-margin", type=int, default = 300, help="Court margin for detecting players and excluding line judges (in pixels)", required=True)
 
+    parser.add_argument("--p1-handedness", type=str, choices=['right', 'left'], default='right', help="Player 1 (Bottom) handedness")
+    parser.add_argument("--p2-handedness", type=str, choices=['right', 'left'], default='right', help="Player 2 (Top) handedness")
+
     # Parse the arguments
     args = parser.parse_args()
 
@@ -815,6 +862,8 @@ if __name__ == "__main__":
             yolo_verbosity=args.yolo_verbosity,
             player_detection_court_margin=args.player_detection_court_margin,
             original_video_name=original_video_name,
+            p1_handedness=args.p1_handedness,
+            p2_handedness=args.p2_handedness,
             frame_offset=frame_offset,
             last_known_positions=last_clip_positions
         )
