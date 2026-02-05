@@ -22,6 +22,65 @@ class Tennis3DSystem:
         self.device = device
         print(f"[3D System] Initializing on {device}...")
 
+        # 1. Initialize MotionBERT (The 3D Lifter)
+        self.lifter = MotionBERTExtractor(checkpoint_path=motionbert_weights, device=device)
+
+        # 2. Initialize Joint Model (HDGCN)
+        # FIX: Set in_channels=4 (X, Y, Z, Confidence) to match your weights
+        print(f"Loading HDGCN Joint Model from {joint_weights}...")
+        self.model_joint = HDGCN_Tennis(num_classes=12, in_channels=4) 
+        self.model_joint.load_state_dict(torch.load(joint_weights, map_location=device))
+        self.model_joint.to(device).eval()
+
+        # 3. Initialize Bone Model (HDGCN)
+        print(f"Loading HDGCN Bone Model from {bone_weights}...")
+        self.model_bone = HDGCN_Tennis(num_classes=12, in_channels=4)
+        self.model_bone.load_state_dict(torch.load(bone_weights, map_location=device))
+        self.model_bone.to(device).eval()
+
+    def predict(self, kpts_2d_sequence):
+        """
+        Args:
+            kpts_2d_sequence: (40, 17, 3) array [x, y, conf]
+        """
+        # --- A. LIFT TO 3D ---
+        # MotionBERT returns (40, 17, 3) -> X, Y, Z
+        kpts_3d = self.lifter.lift_sequence(kpts_2d_sequence) 
+
+        # --- B. COMBINE CHANNELS (Fix for Size Mismatch) ---
+        # We need (X, Y, Z, Conf). 
+        # kpts_3d has (X, Y, Z). kpts_2d_sequence has (Conf) at index 2.
+        
+        # Extract Confidence from 2D input
+        conf_channel = kpts_2d_sequence[:, :, 2:3] # Shape (40, 17, 1)
+        
+        # Concatenate: (40, 17, 3) + (40, 17, 1) -> (40, 17, 4)
+        kpts_combined = np.concatenate([kpts_3d, conf_channel], axis=2)
+
+        # Prepare for Pytorch: (Batch, Channel, Time, Vertex, Person)
+        # Shape: (1, 4, 40, 17, 1)
+        data_joint = torch.tensor(kpts_combined, dtype=torch.float32).to(self.device)
+        data_joint = data_joint.permute(2, 0, 1).unsqueeze(0).unsqueeze(-1)
+
+        # --- C. CREATE BONE DATA ---
+        data_bone = torch.zeros_like(data_joint)
+        for v1, v2 in COCO_BONE_PAIRS:
+            data_bone[:, :, :, v1, :] = data_joint[:, :, :, v1, :] - data_joint[:, :, :, v2, :]
+
+        # --- D. INFERENCE ---
+        with torch.no_grad():
+            output_joint = self.model_joint(data_joint)
+            output_bone = self.model_bone(data_bone)
+
+            # Ensemble Average
+            final_output = (output_joint + output_bone) / 2
+            probs = torch.softmax(final_output, dim=1)
+
+        return probs.cpu().numpy()[0]
+    def __init__(self, joint_weights, bone_weights, motionbert_weights, device='cuda'):
+        self.device = device
+        print(f"[3D System] Initializing on {device}...")
+
         # 1. Initialize MotionBERT (The "True 3D" Lifter)
         self.lifter = MotionBERTExtractor(checkpoint_path=motionbert_weights, device=device)
 
