@@ -32,6 +32,55 @@ import json
 import shutil
 from ultralytics import YOLO 
 
+def normalize_keypoints_for_model(sequence_data):
+    """
+    Converts sequence_data (list of dicts) into a normalized numpy array
+    expected by the new Ensemble/3D system.
+    """
+    SEQ_LEN = 40
+    NUM_JOINTS = 17
+    
+    # Pre-allocate (40, 17, 3)
+    norm_kpts = np.zeros((SEQ_LEN, NUM_JOINTS, 3), dtype=np.float32)
+    
+    for i, frame_info in enumerate(sequence_data):
+        if i >= SEQ_LEN: break
+        
+        # Get raw data
+        raw_kpts = np.array(frame_info.get('keypoints', []))
+        bbox = frame_info.get('bbox', [0, 0, 1, 1])
+        
+        # Handle empty/invalid keypoints
+        if raw_kpts.size == 0 or raw_kpts.shape[0] != NUM_JOINTS:
+            continue
+            
+        # --- Normalization Logic (Matches new Extractor) ---
+        xy = raw_kpts[:, :2]
+        conf = raw_kpts[:, 2]
+        
+        # 1. Calculate Box Height (Scale Factor)
+        x1, y1, x2, y2 = bbox
+        box_h = y2 - y1
+        scale = box_h if box_h > 0 else 1.0
+        
+        # 2. Find Root (Center of Hips)
+        # 11=Left Hip, 12=Right Hip
+        if conf[11] > 0.1 and conf[12] > 0.1:
+            root = (xy[11] + xy[12]) / 2.0
+        elif conf[11] > 0.1:
+            root = xy[11]
+        elif conf[12] > 0.1:
+            root = xy[12]
+        else:
+            # Fallback to Box Center
+            root = np.array([(x1+x2)/2, (y1+y2)/2])
+            
+        # 3. Normalize
+        # Center around root and divide by scale
+        norm_kpts[i, :, :2] = (xy - root) / scale
+        norm_kpts[i, :, 2] = conf # Keep confidence
+        
+    return norm_kpts
 
 def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbosity, player_detection_court_margin, frame_offset=0, last_known_positions=None):
     start_time = time.time()
@@ -40,9 +89,6 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
 
     # Read Video
     input_video_path = input_video
-
-    # Initialize Action Classifier
-    extractor = PoseExtractor()
 
     # ADD THIS NEW BLOCK
     action_model = Tennis3DSystem(
@@ -469,7 +515,7 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
                 sequence_data.append({'bbox': [0,0,1,1], 'keypoints': [[0,0,0]] * 17})
 
         # 3. Normalize (Already correct in your code)
-        normalized_input = extractor.process_sequence(sequence_data)
+        normalized_input = normalize_keypoints_for_model(sequence_data)
         
         # --- CHANGED: Use the 3D System Wrapper ---
         # The system handles the tensor conversion, 3D lifting, and Ensemble voting internally.
