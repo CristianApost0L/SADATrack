@@ -62,6 +62,7 @@ class Tennis3DSystem:
         # 1. Invert Z-axis: Fixes "Back View" confusion (Forehand -> Backhand error)
         # This aligns MotionBERT's coordinate system with the Training Normalization logic
         kpts_combined[:, :, 0] = -kpts_combined[:, :, 0]
+        kpts_combined[:, :, 2] = -kpts_combined[:, :, 2]
         
         # --- B. NORMALIZE (THE MISSING STEP) ---
         # We must align the skeleton (center hips, rotate view) just like in training.
