@@ -183,18 +183,6 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
         last_known_positions=last_known_positions 
     )
 
-    try:
-        export_data = {}
-        for i, frame_detections in enumerate(player_detections):
-            frame_boxes = []
-            for track_id, data in frame_detections.items():
-                # data['bbox'] is [x1, y1, x2, y2]
-                frame_boxes.append({
-                    "track_id": track_id,
-                    "bbox": data['bbox']
-                })
-            export_data[i] = frame_boxes
-
     pose_estimator = YOLO('/kaggle/input/cv-project/yolo26x-pose.pt')
 
     print("Running Pose Estimation on detected players (BATCHED)...")
