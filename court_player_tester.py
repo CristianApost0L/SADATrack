@@ -1,4 +1,3 @@
-%%writefile /kaggle/working/CV_project/simple_main.py
 import cv2
 import os
 import argparse
