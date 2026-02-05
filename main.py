@@ -195,27 +195,6 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
                 })
             export_data[i] = frame_boxes
 
-        # 1. Setup output folder
-        json_output_dir = "/kaggle/working/detections"
-        os.makedirs(json_output_dir, exist_ok=True)
-        
-        # 2. Extract the name directly from the tuple
-        # original_video_name is passed as ('my_video', '.mp4')
-        if isinstance(original_video_name, tuple):
-            file_root = original_video_name[0]
-        else:
-            # Fallback if it somehow gets passed as a string
-            file_root = os.path.splitext(os.path.basename(str(original_video_name)))[0]
-
-        # 3. Create path
-        json_output_path = os.path.join(json_output_dir, f"{file_root}_detections.json")
-        
-        with open(json_output_path, 'w') as f:
-            json.dump(export_data, f, cls=NumpyEncoder, indent=4)
-        print(f"   📄 Saved detection log to {json_output_path}")
-    except Exception as e:
-        print(f"   ⚠️ Could not save detection JSON: {e}")
-
     pose_estimator = YOLO('/kaggle/input/cv-project/yolo26x-pose.pt')
 
     print("Running Pose Estimation on detected players (BATCHED)...")
@@ -390,6 +369,44 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     for pid in all_detected_ids:
         if pid not in player_id_map:
             player_id_map[pid] = 1
+
+    # JSON EXPORT (With Player Map)
+    try:
+        # 1. Create a structured dictionary including the Map and Frames
+        export_data = {
+            "player_id_map": player_id_map,  # <--- The new requirement
+            "frames": {}
+        }
+        
+        # 2. Fill in the frame data
+        for i, frame_detections in enumerate(player_detections):
+            frame_boxes = []
+            for track_id, data in frame_detections.items():
+                frame_boxes.append({
+                    "track_id": track_id,
+                    "bbox": data['bbox']
+                })
+            # Use string keys for frames to be valid JSON
+            export_data["frames"][i] = frame_boxes
+
+        # 3. Setup output folder
+        json_output_dir = "/kaggle/working/detections"
+        os.makedirs(json_output_dir, exist_ok=True)
+        
+        # 4. Handle filename safely (Tuple check logic)
+        if isinstance(original_video_name, tuple):
+             file_root = original_video_name[0]
+        else:
+             file_root = os.path.splitext(os.path.basename(str(original_video_name)))[0]
+
+        json_output_path = os.path.join(json_output_dir, f"{file_root}_detections.json")
+
+        with open(json_output_path, 'w') as f:
+            json.dump(export_data, f, cls=NumpyEncoder, indent=4)
+        print(f"   📄 Saved detection log + ID Map to {json_output_path}")
+
+    except Exception as e:
+        print(f"   ⚠️ Could not save detection JSON: {e}")
 
     # MiniCourt
     mini_court = MiniCourt(raw_frames[0]) 
