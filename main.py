@@ -20,8 +20,10 @@ import cv2
 import pandas as pd
 import numpy as np
 from copy import deepcopy
-from action_recognition.model import HDGCN_Tennis
+from action_recognition.model import CTRGCN_Tennis
 from action_recognition.extractor import PoseExtractor
+from action_recognition.dataset import COCO_BONE_PAIRS
+from action_recognition.system import Tennis3DSystem
 import torch
 import os
 import argparse
@@ -42,9 +44,13 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     # Initialize Action Classifier
     extractor = PoseExtractor()
 
-    action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
-    action_model.load_state_dict(torch.load('/kaggle/input/cv-project/new_Swing_classifier.pth'))
-    action_model.eval()
+    # ADD THIS NEW BLOCK
+    action_model = Tennis3DSystem(
+        joint_weights='Swing_classifier_joint.pth',
+        bone_weights='Swing_classifier_bone.pth',
+        motionbert_weights='mb_ft_h36m.pth',
+        device='cuda'
+    )
     
     # --- DUAL STREAM SETUP ---
     # Stream A: Raw Frames (Clean, low noise) -> BEST FOR BALL DETECTION
@@ -462,67 +468,62 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
                 # We use a dummy bbox [0,0,1,1] to avoid division by zero errors
                 sequence_data.append({'bbox': [0,0,1,1], 'keypoints': [[0,0,0]] * 17})
 
-        # 3. Normalize using the class instance
-        # You need to initialize 'extractor = PoseExtractor()' before the loop (see Fix #4)
+        # 3. Normalize (Already correct in your code)
         normalized_input = extractor.process_sequence(sequence_data)
         
-        # Convert to tensor (N, C, T, V)
-        inp_tensor = torch.from_numpy(normalized_input).unsqueeze(0).float()
-        inp_tensor = inp_tensor.permute(0, 3, 1, 2) # (1, 3, 40, 17)
+        # --- CHANGED: Use the 3D System Wrapper ---
+        # The system handles the tensor conversion, 3D lifting, and Ensemble voting internally.
+        # It returns PROBABILITIES (numpy array), not logits (tensor).
+        probs = action_model.predict(normalized_input)
+            
+        # --- FIX 1: BASELINE VOLLEY HALLUCINATION ---
+        # Logic: If player is far from the net (> 4m), they cannot be hitting a volley.
+        player_mc_pos = player_mini_court_detections[start_frame][player_shot_ball]
+        
+        # Calculate Net Y position (Midpoint of the court drawing)
+        net_y = (mini_court.court_start_y + mini_court.court_end_y) / 2
+        
+        # Distance from Net
+        dist_from_net_pixels = abs(player_mc_pos[1] - net_y)
+        dist_from_net_meters = convert_pixel_distance_to_meters(
+            dist_from_net_pixels, 
+            constants.DOUBLE_LINE_WIDTH,
+            mini_court.get_width_of_mini_court()
+        )
+        
+        if dist_from_net_meters > 4.0: # If > 4 meters from net
+             for idx, class_name in enumerate(constants.THETIS_CLASSES):
+                 if "volley" in class_name:
+                     probs[idx] = 0.0 # Set probability to 0
 
-        # 4. Predict
-        with torch.no_grad():
-            output = action_model(inp_tensor)
+        # --- FIX 2: SERVICE & SMASH CONFUSION (HEIGHT CHECK) ---
+        # Logic: Serves/Smashes happen ABOVE the head. If ball is below nose, ban them.
+        
+        # Get Nose Y (Keypoint 0)
+        shooter_kpts = player_detections[start_frame][player_shot_ball].get('keypoints', [])
+        if shooter_kpts and len(shooter_kpts) > 0:
+            nose_y = shooter_kpts[0][1]
             
-            # --- FIX 1: BASELINE VOLLEY HALLUCINATION ---
-            # Logic: If player is far from the net (> 4m), they cannot be hitting a volley.
-            player_mc_pos = player_mini_court_detections[start_frame][player_shot_ball]
+            # Get Ball Y (Center of box)
+            ball_box = ball_detections[start_frame][1]
+            ball_y = (ball_box[1] + ball_box[3]) / 2
             
-            # Calculate Net Y position (Midpoint of the court drawing)
-            net_y = (mini_court.court_start_y + mini_court.court_end_y) / 2
-            
-            # Distance from Net
-            dist_from_net_pixels = abs(player_mc_pos[1] - net_y)
-            dist_from_net_meters = convert_pixel_distance_to_meters(
-                dist_from_net_pixels, 
-                constants.DOUBLE_LINE_WIDTH,
-                mini_court.get_width_of_mini_court()
-            )
-            
-            if dist_from_net_meters > 4.0: # If > 4 meters from net
-                 for idx, class_name in enumerate(constants.THETIS_CLASSES):
-                     if "volley" in class_name:
-                         output[0][idx] = -float('inf')
-
-            # --- FIX 2: SERVICE & SMASH CONFUSION (HEIGHT CHECK) ---
-            # Logic: Serves/Smashes happen ABOVE the head. If ball is below nose, ban them.
-            
-            # Get Nose Y (Keypoint 0)
-            shooter_kpts = player_detections[start_frame][player_shot_ball].get('keypoints', [])
-            if shooter_kpts and len(shooter_kpts) > 0:
-                nose_y = shooter_kpts[0][1]
-                
-                # Get Ball Y (Center of box)
-                ball_box = ball_detections[start_frame][1]
-                ball_y = (ball_box[1] + ball_box[3]) / 2
-                
-                # Image Coordinates: Y increases downwards.
-                # So if Ball Y > Nose Y, the ball is BELOW the nose.
-                if ball_y > nose_y:
-                    for idx, class_name in enumerate(constants.THETIS_CLASSES):
-                        if "service" in class_name or "smash" in class_name:
-                            output[0][idx] = -float('inf')
-
-            # Ban Serve after FRAME_LIMIT frames
-            if start_frame > constants.FRAME_LIMIT_FOR_SERVES:
-                # If a class name contains "service", kill its probability.
+            # Image Coordinates: Y increases downwards.
+            # So if Ball Y > Nose Y, the ball is BELOW the nose.
+            if ball_y > nose_y:
                 for idx, class_name in enumerate(constants.THETIS_CLASSES):
-                    if "service" in class_name:
-                        # Set logit to negative infinity so argmax never picks it
-                        output[0][idx] = -float('inf')
+                    if "service" in class_name or "smash" in class_name:
+                        probs[idx] = 0.0
 
-            prediction_idx = torch.argmax(output, dim=1).item()
-            shot_name = constants.THETIS_CLASSES[prediction_idx]
+        # Ban Serve after FRAME_LIMIT frames
+        if start_frame > constants.FRAME_LIMIT_FOR_SERVES:
+            for idx, class_name in enumerate(constants.THETIS_CLASSES):
+                if "service" in class_name:
+                    probs[idx] = 0.0
+
+        # Select best class (Using Numpy now, not Torch)
+        prediction_idx = np.argmax(probs)
+        shot_name = constants.THETIS_CLASSES[prediction_idx]
 
         # SAVE TO LOG
         # Add frame_offset to start_frame so it matches the original full video
