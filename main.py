@@ -195,14 +195,20 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
                 })
             export_data[i] = frame_boxes
 
-        # Save JSON alongside the output video path
-        json_output_path = "kaggle/working/detections"
-        os.makedirs(json_output_path, exist_ok=True)
+        # 1. Setup output folder
+        json_output_dir = "/kaggle/working/detections"
+        os.makedirs(json_output_dir, exist_ok=True)
         
-        filename_with_ext = os.path.basename(original_video_name)
-        file_root = filename_with_ext[0]  
+        # 2. Extract the name directly from the tuple
+        # original_video_name is passed as ('my_video', '.mp4')
+        if isinstance(original_video_name, tuple):
+            file_root = original_video_name[0]
+        else:
+            # Fallback if it somehow gets passed as a string
+            file_root = os.path.splitext(os.path.basename(str(original_video_name)))[0]
 
-        json_output_path = os.path.join(json_output_path, f"{file_root}_detections.json")
+        # 3. Create path
+        json_output_path = os.path.join(json_output_dir, f"{file_root}_detections.json")
         
         with open(json_output_path, 'w') as f:
             json.dump(export_data, f, cls=NumpyEncoder, indent=4)
