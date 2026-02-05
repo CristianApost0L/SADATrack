@@ -92,9 +92,9 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
 
     # ADD THIS NEW BLOCK
     action_model = Tennis3DSystem(
-        joint_weights='Swing_classifier_joint.pth',
-        bone_weights='Swing_classifier_bone.pth',
-        motionbert_weights='mb_ft_h36m.pth',
+        joint_weights='/kaggle/input/cv-project/Swing_classifier_joint.pth',
+        bone_weights='/kaggle/input/cv-project/Swing_classifier_bone.pth',
+        motionbert_weights='/kaggle/input/cv-project/mb_ft_h36m.pth',
         device='cuda'
     )
     
