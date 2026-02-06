@@ -130,6 +130,9 @@ def save_validation_clips(video_path, model_predictions_log, gold_standard_data,
     os.makedirs(val_clips_dir, exist_ok=True)
     print(f"\n[INFO] Saving validation clips to: {val_clips_dir}")
 
+    # Extract clean video name (e.g. "match_01.mp4" -> "match_01")
+    video_name = os.path.splitext(os.path.basename(video_path))[0]
+
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     if fps == 0: fps = 24
@@ -192,7 +195,7 @@ def save_validation_clips(video_path, model_predictions_log, gold_standard_data,
         clean_gt = gt['shot'].replace(" ", "_")
         clean_pred = pred_shot_str.replace(" ", "_")
         
-        clip_name = f"Frame_{gt['frame']:04d}_{status_str}_Exp_{clean_gt}_Found_{clean_pred}.mp4"
+        clip_name = f"{video_name}_Frame_{gt['frame']:04d}_{status_str}_Exp_{clean_gt}_Found_{clean_pred}.mp4"
         clip_path = os.path.join(val_clips_dir, clip_name)
         
         start_f = max(0, center_frame - clip_window)
