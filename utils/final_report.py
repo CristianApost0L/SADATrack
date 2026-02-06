@@ -221,3 +221,113 @@ def save_validation_clips(video_path, model_predictions_log, gold_standard_data,
         
     cap.release()
     print("Validation clips generation complete.")
+
+def save_clean_validation_clips(original_video_path, model_predictions_log, gold_standard_data, output_dir, processed_fps=24, frame_tolerance=10, clip_window=40):
+    """
+    Saves clips from the ORIGINAL RAW video (Clean, No Overlays).
+    Crucially, it RESAMPLES the raw video to match the processed frame rate (24fps).
+    This ensures the 'clean' clip is exactly the same speed/duration as the 'processed' clip.
+    """
+    if not gold_standard_data: return
+
+    if not os.path.exists(original_video_path):
+        print(f"⚠️ Cannot find original video file at {original_video_path}. Skipping clean clip generation.")
+        return
+
+    val_clips_dir = os.path.join(output_dir, "validation_clips_clean")
+    os.makedirs(val_clips_dir, exist_ok=True)
+    print(f"\n[INFO] Saving CLEAN validation clips to: {val_clips_dir}")
+
+    video_name = os.path.splitext(os.path.basename(original_video_path))[0]
+    
+    cap = cv2.VideoCapture(original_video_path)
+    orig_fps = cap.get(cv2.CAP_PROP_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    # Calculate Ratio to map Processed Frame Index -> Original Frame Index
+    # e.g. If Processed=24fps, Orig=60fps, Ratio = 2.5
+    # Processed Frame 100 corresponds to Original Frame 250
+    fps_ratio = orig_fps / processed_fps
+
+    for gt in gold_standard_data:
+        # --- MATCHING LOGIC (COPIED EXACTLY) ---
+        candidates = []
+        for pred in model_predictions_log:
+            if abs(pred['frame'] - gt['frame']) <= frame_tolerance:
+                candidates.append(pred)
+
+        match = None
+        if candidates:
+            def get_score(cand):
+                score = 0
+                if cand['player'] == gt['player']: score += 1000
+                gt_shot = gt['shot'].lower()
+                pred_shot = cand['shot'].lower()
+                if gt_shot == pred_shot: score += 500
+                else:
+                    is_fh = "forehand" in gt_shot and "forehand" in pred_shot
+                    is_bh = "backhand" in gt_shot and "backhand" in pred_shot
+                    is_sv = ("serve" in gt_shot or "service" in gt_shot) and ("serve" in pred_shot or "service" in pred_shot)
+                    if is_fh or is_bh or is_sv: score += 300
+                dist = abs(cand['frame'] - gt['frame'])
+                score -= dist 
+                return score
+            match = max(candidates, key=get_score)
+        # ---------------------------------------
+
+        status_str = "MISSED"
+        pred_shot_str = "None"
+        center_frame_processed = gt['frame']
+
+        if match:
+            center_frame_processed = match['frame']
+            player_ok = (match['player'] == gt['player'])
+            gt_shot = gt['shot'].lower()
+            pred_shot = match['shot'].lower()
+            pred_shot_str = match['shot']
+
+            if gt_shot == pred_shot and player_ok: status_str = "PERFECT"
+            elif player_ok:
+                is_fh = "forehand" in gt_shot and "forehand" in pred_shot
+                is_bh = "backhand" in gt_shot and "backhand" in pred_shot
+                is_sv = ("serve" in gt_shot or "service" in gt_shot) and ("serve" in pred_shot or "service" in pred_shot)
+                if is_fh or is_bh or is_sv: status_str = "PARTIAL"
+                else: status_str = "WRONG_SHOT"
+            else: status_str = "WRONG_PLAYER"
+
+        clean_gt = gt['shot'].replace(" ", "_")
+        clean_pred = pred_shot_str.replace(" ", "_")
+        
+        # Determine Window in Processed Time (Frames)
+        start_f_proc = max(0, center_frame_processed - clip_window)
+        end_f_proc = center_frame_processed + clip_window
+
+        # Append _clean to filename
+        clip_name = f"{video_name}_Frame_{gt['frame']:04d}_{status_str}_Exp_{clean_gt}_Found_{clean_pred}_clean.mp4"
+        clip_path = os.path.join(val_clips_dir, clip_name)
+        
+        # Prepare Writer (at Processed FPS, e.g. 24)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out_clip = cv2.VideoWriter(clip_path, fourcc, processed_fps, (width, height))
+        
+        # --- FRAME SAMPLING LOGIC ---
+        # We iterate through the PROCESSED frame indices (start_f_proc -> end_f_proc)
+        # For each, we calculate the corresponding ORIGINAL frame index, seek, and write.
+        curr_proc = start_f_proc
+        while curr_proc <= end_f_proc:
+            # Map to original frame index
+            orig_frame_idx = int(curr_proc * fps_ratio)
+            
+            cap.set(cv2.CAP_PROP_POS_FRAMES, orig_frame_idx)
+            ret, frame = cap.read()
+            if not ret: 
+                break
+                
+            out_clip.write(frame)
+            curr_proc += 1
+            
+        out_clip.release()
+        
+    cap.release()
+    print("Clean clips generation complete.")

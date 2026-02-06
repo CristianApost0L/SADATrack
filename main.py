@@ -22,6 +22,7 @@ from utils import (read_video,
                    enhance_video_contrast,
                    print_validation_report,
                    save_validation_clips,
+                   save_clean_validation_clips,
                    split_video_into_clips,
                    merge_clips,
                    draw_shot_name_marker_frame_number,
@@ -297,6 +298,7 @@ if __name__ == "__main__":
     parser.add_argument("--p1-handedness", type=str, choices=['right', 'left'], default='right', help="Player 1 (Bottom) handedness")
     parser.add_argument("--p2-handedness", type=str, choices=['right', 'left'], default='right', help="Player 2 (Top) handedness")
     parser.add_argument("--save-validation-clips", action='store_true', help="Extract and save video clips for every validation event")
+    parser.add_argument("--save-clean-validation-clips", action='store_true', help="Extract and save CLEAN video clips (no overlays) for every validation event")
 
     # Parse the arguments
     args = parser.parse_args()
@@ -408,4 +410,14 @@ if __name__ == "__main__":
             model_predictions_log=all_model_predictions,
             gold_standard_data=gold_standard_data,
             output_dir=final_output_dir
+        )
+
+    if args.save_clean_validation_clips:
+        print("\n--- Generating CLEAN Validation Clips ---")
+        save_clean_validation_clips(
+            original_video_path=args.path,   
+            model_predictions_log=all_model_predictions,
+            gold_standard_data=gold_standard_data,
+            output_dir=final_output_dir,
+            processed_fps=constants.TARGET_FPS
         )
