@@ -242,4 +242,4 @@ def predict_shot(extractor,
     current_player_stats[f'player_{mapped_shooter_id}_total_shot_speed'] += speed_of_ball_shot
     current_player_stats[f'player_{mapped_shooter_id}_last_shot_speed'] = speed_of_ball_shot
 
-    return current_player_stats, log_entry
+    return shot_name, current_player_stats, log_entry

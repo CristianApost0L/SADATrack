@@ -426,7 +426,7 @@ def process_single_clip(input_video,
         
         # Handle result
         if result is not None:
-            new_stats, log_entry = result
+            shot_name, new_stats, log_entry = result
             
             # Update lists here (Main Loop Control)
             player_stats_data.append(new_stats)
