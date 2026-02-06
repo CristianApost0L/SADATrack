@@ -407,7 +407,7 @@ def process_single_clip(input_video,
         # Get the latest stats to pass in
         last_stats = player_stats_data[-1]
         
-        predict_shot(extractor,
+        prediction_result = predict_shot(extractor,
                  action_model,
                  HDGCN_window_size,
                  ball_shot_frames, 
@@ -425,8 +425,8 @@ def process_single_clip(input_video,
                  last_stats)
         
         # Handle result
-        if result is not None:
-            shot_name, new_stats, log_entry = result
+        if prediction_result is not None:
+            shot_name, new_stats, log_entry = prediction_result
             
             # Update lists here (Main Loop Control)
             player_stats_data.append(new_stats)
