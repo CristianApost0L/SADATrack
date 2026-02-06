@@ -404,6 +404,9 @@ def process_single_clip(input_video,
     
     # --- PREDICT EACH SHOT ---
     for ball_shot_ind in range(len(ball_shot_frames)):
+        # Get the latest stats to pass in
+        last_stats = player_stats_data[-1]
+        
         predict_shot(extractor,
                  action_model,
                  HDGCN_window_size,
@@ -418,9 +421,16 @@ def process_single_clip(input_video,
                  ball_detections,
                  player_mini_court_detections,
                  player_id_map,
-                 player_stats_data,
                  ball_mini_court_detections,
-                 model_predictions_log)
+                 last_stats)
+        
+        # Handle result
+        if result is not None:
+            new_stats, log_entry = result
+            
+            # Update lists here (Main Loop Control)
+            player_stats_data.append(new_stats)
+            model_predictions_log.append(log_entry)
 
 
     player_stats_data_df = pd.DataFrame(player_stats_data)

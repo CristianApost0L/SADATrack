@@ -23,9 +23,8 @@ def predict_shot(extractor,
                  ball_detections,
                  player_mini_court_detections,
                  player_id_map,
-                 player_stats_data,
                  ball_mini_court_detections,
-                 model_predictions_log):
+                 last_player_stats):
     '''
     Predicts the shot given data
     '''
@@ -60,7 +59,7 @@ def predict_shot(extractor,
 
     # Safety check: if no players detected in this frame
     if len(player_positions) == 0:
-        return
+        return None
 
     player_shot_ball = min( player_positions.keys(), key=lambda player_id: measure_distance(player_positions[player_id],
                                                                                                 ball_mini_court_detections[start_frame][1]))
@@ -68,7 +67,8 @@ def predict_shot(extractor,
     # Map to 1 or 2
     mapped_shooter_id = player_id_map.get(player_shot_ball, 1)
 
-    current_player_stats = deepcopy(player_stats_data[-1])
+    # COPY FROM LAST STATS
+    current_player_stats = deepcopy(last_player_stats)
     current_player_stats['frame_num'] = start_frame
 
     # 1. Define the Window
@@ -203,14 +203,13 @@ def predict_shot(extractor,
     # SAVE TO LOG
     # Add frame_offset to start_frame so it matches the original full video
     true_frame_index = start_frame + frame_offset
-    model_predictions_log.append({
+    log_entry = {
         "frame": true_frame_index,
         "shot": shot_name,
         "player": mapped_shooter_id
-    })
+    }
 
     current_player_stats['shot_type'] = shot_name
-
     current_player_stats['shot_player_id'] = mapped_shooter_id
 
     print(f"Frame {start_frame}: | Prediction: {shot_name} | Player: {player_shot_ball} (Mapped: {mapped_shooter_id})")
@@ -243,4 +242,4 @@ def predict_shot(extractor,
     current_player_stats[f'player_{mapped_shooter_id}_total_shot_speed'] += speed_of_ball_shot
     current_player_stats[f'player_{mapped_shooter_id}_last_shot_speed'] = speed_of_ball_shot
 
-    player_stats_data.append(current_player_stats)
+    return current_player_stats, log_entry
