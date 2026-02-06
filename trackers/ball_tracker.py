@@ -1,10 +1,16 @@
 import cv2
 import torch
 import numpy as np
+import constants
+
 from tqdm import tqdm
 from scipy.spatial import distance
 from tracknet.tracknet import BallTrackerNet
-import constants
+
+from utils import(
+    filter_adjacent_frames,
+    get_proximity_score
+)
 
 class BallTracker:
     def __init__(self, model_path, device='cuda'):
@@ -174,3 +180,76 @@ class BallTracker:
             output_video_frames.append(frame)
         
         return output_video_frames
+    
+    def find_ball_shot_frames(self, video_frames, player_detections):
+        '''
+        All-in-one complete function that takes video in and returns frames where the ball was shot
+        
+        :param self: ball_tracker
+        :param video_frames: video frames to analyze
+        :param player_detections: players detected in the previous step of the pipeline
+        '''
+        ball_detections = self.detect_frames(video_frames)
+    
+        # Interpolate ball (standard step)
+        ball_detections = self.interpolate_ball_positions(ball_detections)
+        
+        # 1. Get ALL candidates (Hits + Bounces) using geometric heuristic
+        candidate_shot_frames = self.get_ball_shot_frames(ball_detections)
+        
+        # Merge frames like [141, 145, 147] into just [141]
+        # 24 frames = 1 second buffer (physically impossible to hit 2 shots in 1 sec)
+        candidate_shot_frames = filter_adjacent_frames(candidate_shot_frames, min_distance=24)
+
+        # 2. Detect Bounces using the new Model
+        detected_bounces = []
+        # Pass the list of (x,y) tuples directly
+        detected_bounces = self.predict(ball_detections) 
+
+        # 3. Filter: Keep a candidate ONLY if it is NOT a bounce
+        clean_candidates = []
+        for frame in candidate_shot_frames:
+            # Check if this frame is close to any detected bounce (within margin of error, e.g., 3 frames)
+            is_bounce = False
+            for b_frame in detected_bounces:
+                if abs(frame - b_frame) <= 3: 
+                    is_bounce = True
+                    break
+            
+            # If it's not a bounce, it's a hit!
+            if not is_bounce:
+                clean_candidates.append(frame)
+
+        # SMART FILTERING: Group frames and pick the one CLOSEST to a player
+        # Instead of just taking the first frame (filter_adjacent_frames), we verify proximity.
+        
+        ball_shot_frames = []
+        
+        if clean_candidates:
+            clean_candidates.sort()
+            current_group = [clean_candidates[0]]
+            
+            # Iterate and group
+            for i in range(1, len(clean_candidates)):
+                frame = clean_candidates[i]
+                prev_frame = current_group[-1]
+                
+                # If frames are close (within 24 frames / 1 sec), they belong to the same "Shot Event"
+                if frame - prev_frame <= 24:
+                    current_group.append(frame)
+                else:
+                    # Group finished -> Pick the Best Frame in this group
+                    best_frame = min(current_group, key=lambda x: get_proximity_score(ball_detections, player_detections, x))                
+                    ball_shot_frames.append(best_frame)
+                    
+                    # Start new group
+                    current_group = [frame]
+            
+            # Process the final group
+            if current_group:
+                best_frame = min(current_group, key=lambda x: get_proximity_score(ball_detections, player_detections, x))
+                ball_shot_frames.append(best_frame)
+
+        print(f"Refined Shots: {len(ball_shot_frames)} (Filtered noise by Proximity)")
+
+        return ball_shot_frames

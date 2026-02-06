@@ -7,8 +7,6 @@ from utils import (read_video,
                    enhance_video_contrast,
                    smooth_keypoints,
                    print_validation_report,
-                   filter_adjacent_frames,
-                   get_proximity_score,
                    split_video_into_clips,
                    merge_clips
                    )
@@ -63,7 +61,7 @@ def process_single_clip(input_video,
     action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
     action_model.load_state_dict(torch.load(constants.ACTION_MODEL_PATH))
     action_model.eval()
-    
+      
     # --- DUAL STREAM SETUP ---
     # Stream A: Raw Frames (Clean, low noise) -> BEST FOR BALL DETECTION
     raw_frames = read_video(input_video_path)
@@ -73,91 +71,25 @@ def process_single_clip(input_video,
     enhanced_frames = enhance_video_contrast(raw_frames)
 
 
-    # Initialize Trackers
-    player_tracker = PlayerTracker(model_path=constants.PLAYER_TRACKER_PATH)
-    
-    ball_tracker = BallTracker(model_path=constants.BALL_TRACKER_PATH) # Amin model
-
-    bounce_detector = BounceDetector(model_path=constants.BOUNCE_TRACKER_PATH) # Amin model
-
     # --- 2. DETECT PLAYERS (Use ENHANCED frames) ---
+    player_tracker = PlayerTracker(model_path=constants.PLAYER_TRACKER_PATH)
     print("Detecting Players on Enhanced Video...")
     player_detections = player_tracker.detect_frames(enhanced_frames,
                                                      yolo_verbosity=yolo_verbosity
                                                      )
     
-    # FREE MEMORY: We are done with YOLO. Unload it to make room for TrackNet.
     print("Unloading Player Tracker model to free VRAM...")
     del player_tracker.model 
     torch.cuda.empty_cache()
 
     # --- 3. DETECT BALL (Use RAW frames) ---
     # This ignores the noisy/grainy enhanced frames and looks at the clean original
+    ball_tracker = BallTracker(model_path=constants.BALL_TRACKER_PATH) # Amin model
+    bounce_detector = BounceDetector(model_path=constants.BOUNCE_TRACKER_PATH) # Amin model
+
     print("Detecting Ball on Raw Video...")
-    ball_detections = ball_tracker.detect_frames(raw_frames)
+    ball_shot_frames = BallTracker.find_ball_shot_frames(ball_tracker, raw_frames, player_detections)
     
-    # Interpolate ball (standard step)
-    ball_detections = ball_tracker.interpolate_ball_positions(ball_detections)
-    
-    # 1. Get ALL candidates (Hits + Bounces) using geometric heuristic
-    candidate_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
-    
-    # Merge frames like [141, 145, 147] into just [141]
-    # 24 frames = 1 second buffer (physically impossible to hit 2 shots in 1 sec)
-    candidate_shot_frames = filter_adjacent_frames(candidate_shot_frames, min_distance=24)
-
-    # 2. Detect Bounces using the new Model
-    detected_bounces = []
-    # Pass the list of (x,y) tuples directly
-    detected_bounces = bounce_detector.predict(ball_detections) 
-
-    # 3. Filter: Keep a candidate ONLY if it is NOT a bounce
-    clean_candidates = []
-    for frame in candidate_shot_frames:
-        # Check if this frame is close to any detected bounce (within margin of error, e.g., 3 frames)
-        is_bounce = False
-        for b_frame in detected_bounces:
-            if abs(frame - b_frame) <= 3: 
-                is_bounce = True
-                break
-        
-        # If it's not a bounce, it's a hit!
-        if not is_bounce:
-            clean_candidates.append(frame)
-
-    # SMART FILTERING: Group frames and pick the one CLOSEST to a player
-    # Instead of just taking the first frame (filter_adjacent_frames), we verify proximity.
-    
-    ball_shot_frames = []
-    
-    if clean_candidates:
-        clean_candidates.sort()
-        current_group = [clean_candidates[0]]
-        
-        # Iterate and group
-        for i in range(1, len(clean_candidates)):
-            frame = clean_candidates[i]
-            prev_frame = current_group[-1]
-            
-            # If frames are close (within 24 frames / 1 sec), they belong to the same "Shot Event"
-            if frame - prev_frame <= 24:
-                current_group.append(frame)
-            else:
-                # Group finished -> Pick the Best Frame in this group
-                best_frame = min(current_group, key=lambda x: get_proximity_score(ball_detections, player_detections, x))                
-                ball_shot_frames.append(best_frame)
-                
-                # Start new group
-                current_group = [frame]
-        
-        # Process the final group
-        if current_group:
-            best_frame = min(current_group, key=lambda x: get_proximity_score(ball_detections, player_detections, x))
-            ball_shot_frames.append(best_frame)
-
-    print(f"Refined Shots: {len(ball_shot_frames)} (Filtered noise by Proximity)")
-    
-    # FREE MEMORY: We are done with TrackNet. Unload it.
     print("Unloading Ball Tracker model to free VRAM...")
     del ball_tracker.model
     torch.cuda.empty_cache()
