@@ -1,5 +1,6 @@
 import os
 import cv2
+import shutil
 
 def print_validation_report(model_predictions_log, gold_standard_data, frame_tolerance=10):
     """
@@ -127,7 +128,11 @@ def save_validation_clips(video_path, model_predictions_log, gold_standard_data,
         return
 
     val_clips_dir = os.path.join(output_dir, "validation_clips")
+    # delete folder (and everything inside)
+    shutil.rmtree(val_clips_dir, ignore_errors=True)  # ignore if it doesn't exist
+    # recreate folder
     os.makedirs(val_clips_dir, exist_ok=True)
+
     print(f"\n[INFO] Saving validation clips to: {val_clips_dir}")
 
     # Extract clean video name (e.g. "match_01.mp4" -> "match_01")
