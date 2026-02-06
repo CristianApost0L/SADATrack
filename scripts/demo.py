@@ -123,15 +123,33 @@ def convert_to_bone(tensor_data):
 
 def init_model(model_type, weights_path, num_classes, in_channels, device):
     print(f"Loading {model_type} from {weights_path}...")
+    
+    if not os.path.exists(weights_path):
+         raise FileNotFoundError(f"Model weights not found: {weights_path}")
+    
+    # Auto-detect model type from checkpoint
+    checkpoint = torch.load(weights_path, map_location=device)
+    checkpoint_keys = checkpoint.keys()
+    has_hdgcn_keys = any('conv_down' in key or 'aha.' in key for key in checkpoint_keys)
+    has_ctrgcn_keys = any('alpha' in key or 'convs.' in key for key in checkpoint_keys)
+    
+    if has_hdgcn_keys and not has_ctrgcn_keys:
+        detected_type = 'HDGCN'
+    elif has_ctrgcn_keys and not has_hdgcn_keys:
+        detected_type = 'CTRGCN'
+    else:
+        detected_type = model_type
+    
+    if detected_type != model_type:
+        print(f"WARNING: Config specifies '{model_type}' but checkpoint is '{detected_type}'")
+        print(f"Using detected type: {detected_type}")
+        model_type = detected_type
+    
     # Map 'HDGCN' -> HDGCN_Tennis, 'CTRGCN' -> CTRGCN_Tennis
     ModelClass = HDGCN_Tennis if model_type == 'HDGCN' else CTRGCN_Tennis
     
     model = ModelClass(num_classes=num_classes, in_channels=in_channels)
-    
-    if not os.path.exists(weights_path):
-         raise FileNotFoundError(f"Model weights not found: {weights_path}")
-
-    model.load_state_dict(torch.load(weights_path, map_location=device))
+    model.load_state_dict(checkpoint)
     model.to(device)
     model.eval()
     return model

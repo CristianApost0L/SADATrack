@@ -108,7 +108,7 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
     MODALITY = training_config.get('modality', 'joint')
 
     # Model type (HDGCN, CTRGCN, etc.)
-    MODEL_TYPE = model_config.get('model_hyperparameters', 'HDGCN')
+    MODEL_TYPE = model_config.get('type', 'HDGCN')
     
     # Curriculum learning settings
     USE_CURRICULUM = training_config.get('use_curriculum_learning', False)

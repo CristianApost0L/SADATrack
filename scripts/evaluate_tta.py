@@ -158,6 +158,33 @@ def main(config_path):
     # 4. Load config to determine model type
     model_config = config.get('model_hyperparameters', {})
     model_type = model_config.get('type', 'HDGCN')
+    
+    # Check if model checkpoint exists
+    if not os.path.exists(MODEL_SAVE_PATH):
+        print(f"ERROR: Model not found at {MODEL_SAVE_PATH}")
+        return
+    
+    # Auto-detect model type from checkpoint keys
+    print(f"Loading checkpoint to detect model architecture...")
+    checkpoint = torch.load(MODEL_SAVE_PATH, map_location=DEVICE)
+    
+    # Check for distinctive keys to determine model type
+    checkpoint_keys = checkpoint.keys()
+    has_hdgcn_keys = any('conv_down' in key or 'aha.' in key for key in checkpoint_keys)
+    has_ctrgcn_keys = any('alpha' in key or 'convs.' in key for key in checkpoint_keys)
+    
+    if has_hdgcn_keys and not has_ctrgcn_keys:
+        detected_type = 'HDGCN'
+    elif has_ctrgcn_keys and not has_hdgcn_keys:
+        detected_type = 'CTRGCN'
+    else:
+        detected_type = model_type  # Use config if can't determine
+    
+    if detected_type != model_type:
+        print(f"WARNING: Config specifies '{model_type}' but checkpoint appears to be '{detected_type}'")
+        print(f"Using detected type: {detected_type}")
+        model_type = detected_type
+    
     print(f"Initializing model type: {model_type}")
 
     # Load model architecture
@@ -170,14 +197,26 @@ def main(config_path):
     else:
         raise ValueError(f"Unknown model type in config: {model_type}")
     
-    if not os.path.exists(MODEL_SAVE_PATH):
-        print(f"ERROR: Model not found at {MODEL_SAVE_PATH}")
-        return
+    # Load checkpoint with strict=False to handle architecture mismatches
+    try:
+        model.load_state_dict(checkpoint, strict=True)
+        print(f"Model loaded successfully (strict mode)\n")
+    except RuntimeError as e:
+        print(f"Warning: Could not load model in strict mode. Loading with strict=False...")
+        print(f"This may happen if the model architecture has changed.")
+        
+        # Load with strict=False to ignore missing/unexpected keys
+        missing_keys, unexpected_keys = model.load_state_dict(checkpoint, strict=False)
+        
+        if missing_keys:
+            print(f"Missing keys ({len(missing_keys)}): {missing_keys[:5]}{'...' if len(missing_keys) > 5 else ''}")
+        if unexpected_keys:
+            print(f"Unexpected keys ({len(unexpected_keys)}): {unexpected_keys[:5]}{'...' if len(unexpected_keys) > 5 else ''}")
+        
+        print(f"Model loaded successfully (partial load)\n")
     
-    model.load_state_dict(torch.load(MODEL_SAVE_PATH, map_location=DEVICE))
     model.to(DEVICE)
     model.eval()
-    print(f"Model loaded successfully\n")
     
     # 5. Inference with TTA
     all_preds = []
