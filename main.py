@@ -21,10 +21,11 @@ from utils import (read_video,
                    draw_skeletons,
                    enhance_video_contrast,
                    print_validation_report,
+                   save_validation_clips,
                    split_video_into_clips,
                    merge_clips,
                    draw_shot_name_marker_frame_number,
-                   export_json
+                   export_json,
                    )
 
 def process_single_clip(input_video, 
@@ -295,6 +296,7 @@ if __name__ == "__main__":
     parser.add_argument("--player-detection-court-margin", type=int, default = 300, help="Court margin for detecting players and excluding line judges (in pixels)", required=True)
     parser.add_argument("--p1-handedness", type=str, choices=['right', 'left'], default='right', help="Player 1 (Bottom) handedness")
     parser.add_argument("--p2-handedness", type=str, choices=['right', 'left'], default='right', help="Player 2 (Top) handedness")
+    parser.add_argument("--save-validation-clips", action='store_true', help="Extract and save video clips for every validation event")
 
     # Parse the arguments
     args = parser.parse_args()
@@ -397,3 +399,13 @@ if __name__ == "__main__":
     # Cleanup temp folder
     shutil.rmtree(temp_clip_dir)
     shutil.rmtree(processed_clip_dir)
+
+    # 5. SAVE VALIDATION CLIPS (OPTIONAL)
+    if args.save_validation_clips:
+        print("\n--- Generating Validation Video Clips ---")
+        save_validation_clips(
+            video_path=final_output_path,
+            model_predictions_log=all_model_predictions,
+            gold_standard_data=gold_standard_data,
+            output_dir=final_output_dir
+        )

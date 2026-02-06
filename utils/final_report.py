@@ -1,3 +1,6 @@
+import os
+import cv2
+
 def print_validation_report(model_predictions_log, gold_standard_data, frame_tolerance=10):
     """
     Compares prediction log against ground truth with fuzzy matching for shot types.
@@ -110,3 +113,103 @@ def print_validation_report(model_predictions_log, gold_standard_data, frame_tol
     print(f"Shot Exact Matches:     {exact_shots}/{total_labels} ({exact_shots/total_labels*100:.1f}%)")
     print(f"Shot Partial Matches:   {partial_shots}/{total_labels} (Total Useful: {(exact_shots+partial_shots)/total_labels*100:.1f}%)")
     print("="*60 + "\n")
+
+def save_validation_clips(video_path, model_predictions_log, gold_standard_data, output_dir, frame_tolerance=10, clip_window=40):
+    """
+    Iterates through Ground Truth, matches predictions (using the same logic as the report),
+    and saves a video clip for each event.
+    """
+    if not gold_standard_data:
+        return
+
+    if not os.path.exists(video_path):
+        print(f"⚠️ Cannot find video file at {video_path}. Skipping clip generation.")
+        return
+
+    val_clips_dir = os.path.join(output_dir, "validation_clips")
+    os.makedirs(val_clips_dir, exist_ok=True)
+    print(f"\n[INFO] Saving validation clips to: {val_clips_dir}")
+
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps == 0: fps = 24
+    total_vid_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    for gt in gold_standard_data:
+        # --- MATCHING LOGIC (Identical to print_validation_report) ---
+        candidates = []
+        for pred in model_predictions_log:
+            if abs(pred['frame'] - gt['frame']) <= frame_tolerance:
+                candidates.append(pred)
+
+        match = None
+        if candidates:
+            def get_score(cand):
+                score = 0
+                if cand['player'] == gt['player']: score += 1000
+                gt_shot = gt['shot'].lower()
+                pred_shot = cand['shot'].lower()
+                if gt_shot == pred_shot: score += 500
+                else:
+                    is_fh = "forehand" in gt_shot and "forehand" in pred_shot
+                    is_bh = "backhand" in gt_shot and "backhand" in pred_shot
+                    is_sv = ("serve" in gt_shot or "service" in gt_shot) and ("serve" in pred_shot or "service" in pred_shot)
+                    if is_fh or is_bh or is_sv: score += 300
+                dist = abs(cand['frame'] - gt['frame'])
+                score -= dist 
+                return score
+            match = max(candidates, key=get_score)
+        # -----------------------------------------------------------
+
+        # Determine Filename components
+        status_str = "MISSED"
+        pred_shot_str = "None"
+        center_frame = gt['frame'] # Default to GT if missed
+
+        if match:
+            center_frame = match['frame']
+            player_ok = (match['player'] == gt['player'])
+            gt_shot = gt['shot'].lower()
+            pred_shot = match['shot'].lower()
+            pred_shot_str = match['shot']
+
+            if gt_shot == pred_shot and player_ok:
+                status_str = "PERFECT"
+            elif player_ok:
+                is_fh = "forehand" in gt_shot and "forehand" in pred_shot
+                is_bh = "backhand" in gt_shot and "backhand" in pred_shot
+                is_sv = ("serve" in gt_shot or "service" in gt_shot) and ("serve" in pred_shot or "service" in pred_shot)
+                if is_fh or is_bh or is_sv:
+                    status_str = "PARTIAL"
+                else:
+                    status_str = "WRONG_SHOT"
+            else:
+                status_str = "WRONG_PLAYER"
+
+        # Generate Clip
+        clean_gt = gt['shot'].replace(" ", "_")
+        clean_pred = pred_shot_str.replace(" ", "_")
+        
+        clip_name = f"Frame_{gt['frame']:04d}_{status_str}_Exp_{clean_gt}_Found_{clean_pred}.mp4"
+        clip_path = os.path.join(val_clips_dir, clip_name)
+        
+        start_f = max(0, center_frame - clip_window)
+        end_f = min(total_vid_frames - 1, center_frame + clip_window)
+        
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_f)
+        
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out_clip = cv2.VideoWriter(clip_path, fourcc, fps, (width, height))
+        
+        curr = start_f
+        while curr <= end_f:
+            ret, frame = cap.read()
+            if not ret: break
+            out_clip.write(frame)
+            curr += 1
+        out_clip.release()
+        
+    cap.release()
+    print("Validation clips generation complete.")
