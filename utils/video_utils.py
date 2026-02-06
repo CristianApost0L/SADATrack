@@ -328,3 +328,36 @@ def draw_shot_name_marker_frame_number(output_video_frames, bounce_events, mini_
     ## Draw frame number on top left corner
     for i, frame in enumerate(output_video_frames):
         cv2.putText(frame, f"Frame: {i}",(10,30),cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+def crop_players(player_detections, enhanced_frames):
+    '''
+    Crops players (their bounding box) out of videos for pose dection
+    '''
+    all_crops = []
+    crop_metadata = [] # Stores (frame_idx, track_id, crop_x1, crop_y1) to map back later
+
+    for frame_idx, frame_dict in enumerate(player_detections):
+        frame_img = enhanced_frames[frame_idx]
+        img_h, img_w, _ = frame_img.shape
+        
+        for track_id, data in frame_dict.items():
+            bbox = data['bbox']
+            padding = constants.BOUNDING_BOX_PADDING
+            
+            x1, y1, x2, y2 = map(int, bbox)
+            x1 = max(0, x1 - padding)
+            y1 = max(0, y1 - padding)
+            x2 = min(img_w, x2 + padding)
+            y2 = min(img_h, y2 + padding)
+            
+            # Skip invalid boxes
+            if x2 <= x1 or y2 <= y1:
+                frame_dict[track_id]['keypoints'] = []
+                continue
+
+            # Crop and Store
+            player_crop = frame_img[y1:y2, x1:x2]
+            all_crops.append(player_crop)
+            crop_metadata.append((frame_idx, track_id, x1, y1))
+    
+    return all_crops, crop_metadata
