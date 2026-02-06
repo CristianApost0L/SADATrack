@@ -23,18 +23,9 @@ from utils import (read_video,
                    print_validation_report,
                    split_video_into_clips,
                    merge_clips,
-                   draw_shot_name_marker_frame_number
+                   draw_shot_name_marker_frame_number,
+                   export_json
                    )
-
-class NumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return super(NumpyEncoder, self).default(obj)
 
 def process_single_clip(input_video, 
                         output_path, 
@@ -123,7 +114,6 @@ def process_single_clip(input_video,
         last_known_positions=last_known_positions 
     )
 
-
     # --- POSE ESTIMATION ---
     print("Running Pose Estimation on detected players (BATCHED)...")
     pose_estimator = YOLO(constants.YOLO_POSE_PATH)
@@ -133,44 +123,7 @@ def process_single_clip(input_video,
                                                       enhanced_frames, 
                                                       last_known_positions)
 
-    # json export (With Player Map)
-    try:
-        # 1. Create a structured dictionary including the Map and Frames
-        export_data = {
-            "player_id_map": player_id_map,  # <--- The new requirement
-            "frames": {}
-        }
-        
-        # 2. Fill in the frame data
-        for i, frame_detections in enumerate(player_detections):
-            frame_boxes = []
-            for track_id, data in frame_detections.items():
-                frame_boxes.append({
-                    "track_id": track_id,
-                    "bbox": data['bbox']
-                })
-            # Use string keys for frames to be valid JSON
-            export_data["frames"][i] = frame_boxes
-
-        # 3. Setup output folder
-        json_output_dir = "/kaggle/working/detections"
-        os.makedirs(json_output_dir, exist_ok=True)
-        
-        # 4. Handle filename safely (Tuple check logic)
-        if isinstance(original_video_name, tuple):
-             file_root = original_video_name[0]
-        else:
-             file_root = os.path.splitext(os.path.basename(str(original_video_name)))[0]
-
-        json_output_path = os.path.join(json_output_dir, f"{file_root}_detections.json")
-
-        with open(json_output_path, 'w') as f:
-            json.dump(export_data, f, cls=NumpyEncoder, indent=4)
-        print(f"   📄 Saved detection log + ID Map to {json_output_path}")
-
-    except Exception as e:
-        print(f"   ⚠️ Could not save detection JSON: {e}")
-
+    export_json(player_id_map, player_detections, original_video_name)
 
     # MiniCourt
     mini_court = MiniCourt(raw_frames[0]) 
@@ -336,15 +289,10 @@ if __name__ == "__main__":
     
     # Add the path argument
     parser.add_argument("--path", type=str, default = "/kaggle/input/tennis-rally-videos/input_video.mp4", help="The full path to the video file", required=True)
-
     parser.add_argument("--output-path", type=str, default = "/kaggle/working/output_videos", help="The full path to the output", required=False)
-
     parser.add_argument("--window-size", type=int, default = 40, help="The HDGCN shot recognition window size", required=True)
-
     parser.add_argument("--yolo-verbosity", action='store_true', help="Enable YOLO verbose logging")
-
     parser.add_argument("--player-detection-court-margin", type=int, default = 300, help="Court margin for detecting players and excluding line judges (in pixels)", required=True)
-
     parser.add_argument("--p1-handedness", type=str, choices=['right', 'left'], default='right', help="Player 1 (Bottom) handedness")
     parser.add_argument("--p2-handedness", type=str, choices=['right', 'left'], default='right', help="Player 2 (Top) handedness")
 

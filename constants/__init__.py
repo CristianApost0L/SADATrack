@@ -25,6 +25,7 @@ BATCH_SIZE = 12
 
 TEMP_CLIP_DIR = "/kaggle/working/temp_processing_clips"
 PROCESSED_CLIP_DIR = "/kaggle/working/output_videos/clips"
+JSON_OUTPUT_DIR = "/kaggle/working/detections"
 CLIP_DURATION = 60 #seconds
 
 ACTION_MODEL_PATH = '/kaggle/input/cv-project/new_Swing_classifier.pth'
