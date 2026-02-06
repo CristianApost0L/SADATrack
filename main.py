@@ -427,6 +427,25 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
                                                                             court_keypoints
                                                                             )
     
+    bounce_events = {}
+    for frame_idx in detected_bounces:
+        # 1. Get Video Position (Center of the ball box)
+        # Recall ball_detections is now a list of dicts: [{1: [x1,y1,x2,y2]}, ...]
+        if frame_idx < len(ball_detections) and 1 in ball_detections[frame_idx]:
+            bbox = ball_detections[frame_idx][1]
+            video_pos = (int((bbox[0] + bbox[2]) / 2), int((bbox[1] + bbox[3]) / 2))
+        else:
+            continue # Skip if no ball detected in bounce frame
+
+        # 2. Get MiniMap Position
+        if frame_idx < len(ball_mini_court_detections) and 1 in ball_mini_court_detections[frame_idx]:
+            mini_pos = ball_mini_court_detections[frame_idx][1]
+            mini_pos = (int(mini_pos[0]), int(mini_pos[1]))
+        else:
+            continue
+
+        bounce_events[frame_idx] = {'video': video_pos, 'mini': mini_pos}
+
     player_stats_data = [{
         'frame_num':0,
         'player_1_number_of_shots':0,
@@ -687,6 +706,12 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     output_video_frames = mini_court.draw_points_on_mini_court(output_video_frames,player_mini_court_detections)
     output_video_frames = mini_court.draw_points_on_mini_court(output_video_frames,ball_mini_court_detections, color=(0,255,255))    
 
+    current_bounce_markers = {'top': None, 'bottom': None}
+    
+    # Calculate Net Y on MiniMap to distinguish halves
+    # MiniCourt.court_start_y is top, court_end_y is bottom. Net is average.
+    minimap_net_y = (mini_court.court_start_y + mini_court.court_end_y) / 2
+
     # Draw Player Stats
     #output_video_frames = draw_player_stats(output_video_frames,player_stats_data_df)
 
@@ -696,6 +721,35 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     minimap_end_y = mini_court.end_y
     
     for i, frame in enumerate(output_video_frames):
+        # 1. Check if a new bounce happened in this frame
+        if i in bounce_events:
+            evt = bounce_events[i]
+            vid_pos = evt['video']
+            mini_pos = evt['mini']
+            
+            # Determine Half: Compare Y coordinate on MiniMap against Net Y
+            if mini_pos[1] < minimap_net_y:
+                current_bounce_markers['top'] = (vid_pos, mini_pos)
+            else:
+                current_bounce_markers['bottom'] = (vid_pos, mini_pos)
+
+        # 2. Draw Markers (White X)
+        for half, markers in current_bounce_markers.items():
+            if markers is None: continue
+            
+            vid_pt, mini_pt = markers
+            
+            # Draw X on Main Video
+            idx_size = 10
+            cv2.line(frame, (vid_pt[0]-idx_size, vid_pt[1]-idx_size), (vid_pt[0]+idx_size, vid_pt[1]+idx_size), (255,255,255), 2)
+            cv2.line(frame, (vid_pt[0]+idx_size, vid_pt[1]-idx_size), (vid_pt[0]-idx_size, vid_pt[1]+idx_size), (255,255,255), 2)
+
+            # Draw X on MiniMap
+            # Note: MiniMap is already drawn on 'frame', so we just draw on top of it at mini_pt coordinates
+            mini_idx_size = 5
+            cv2.line(frame, (mini_pt[0]-mini_idx_size, mini_pt[1]-mini_idx_size), (mini_pt[0]+mini_idx_size, mini_pt[1]+mini_idx_size), (255,255,255), 2)
+            cv2.line(frame, (mini_pt[0]+mini_idx_size, mini_pt[1]-mini_idx_size), (mini_pt[0]-mini_idx_size, mini_pt[1]+mini_idx_size), (255,255,255), 2)
+
         current_stats = player_stats_data_df.iloc[i]
         shot_type = current_stats['shot_type']
         
