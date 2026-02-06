@@ -82,10 +82,6 @@ def analyze_dataset(config_path):
     
     if imbalance_ratio > 2:
         print(f"\n  WARNING: Classes are significantly imbalanced!")
-        print(f"     Recommendations:")
-        print(f"     • Use weighted metrics: F1-Score, Precision, Recall")
-        print(f"     • Consider class weights in loss function")
-        print(f"     • Use stratified cross-validation (already in place ✓)")
     else:
         print(f"\n OK Classes are well balanced")
     print(f"{'='*60}\n")

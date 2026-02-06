@@ -2,16 +2,14 @@
 
 # Directory paths
 data:
-  raw_dir: 'data/raw/Video RGB'
+  raw_dir: 'archive(1)/VIDEO_RGB'
   processed_dir: 'data/processed'
 
 # Model configuration
 model:
-  yolo_path: 'models/yolo26x-pose.pt'
-  detector_path: 'models/yolo26x.pt'  # Path to YOLO detector for Smart Crop
-  courtside_path: 'Davidsv/CourtSide-Computer-Vision-v1' # Path/Name for CourtSide Racket Detector
-  smart_crop: true                  # Enable Smart Crop
-  use_motionbert: true      # Enable MotionBERT lifting
+  pose_extractor_path: 'models/yolov8x-pose.pt'  # YOLO-Pose model for person detection and keypoint extraction
+  smart_crop: true                  # Enable Smart Crop (zoom on detected person)
+  use_motionbert: true              # Enable MotionBERT 3D lifting
   motionbert_path: 'models/MB_ft_h36m.pth' # Path to MotionBERT checkpoint (Download: https://1drv.ms/f/s!AvAdh0LSjEOlgSoTqtyR5Zsgi8_Z?e=rn4VJf)
 
 # Hyperparameters
@@ -33,6 +31,10 @@ training:
   checkpoint_frequency: 5       # Save checkpoint every N epochs
   monitor_metric: 'f1'          # Metric to monitor: 'f1' or 'loss'
   modality: 'joint'             # 'joint' or 'bone'
+
+  augment: true                # Enable/disable data augmentation
+  robust_validation: true       # Enable/disable robust validation with forced back view
+  default_augmentation_strength: 'medium'  # Default strength if curriculum learning is disabled ('weak', 'medium', 'strong')
   
   # Curriculum Learning
   use_curriculum_learning: true  # Enable/disable curriculum learning for augmentation

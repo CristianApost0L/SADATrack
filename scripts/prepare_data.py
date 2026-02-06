@@ -11,7 +11,7 @@ from src.extractor import PoseExtractor
 from src.dataset import get_thetis_files
 
 def load_config(config_path):
-    """Carica il file YAML di configurazione"""
+    """Load YAML configuration file"""
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
     
@@ -23,37 +23,51 @@ def main(config_path, reuse_2d=False):
     config = load_config(config_path)
     DATA_RAW_DIR = config['data']['raw_dir']
     DATA_PROCESSED_DIR = config['data']['processed_dir']
-    MODEL_YOLO_PATH = config['model']['yolo_path']
+
+    # Models
+    MODEL_POSE_EXTRACTOR_PATH = config['model'].get('pose_extractor_path')
+    USE_MOTIONBERT = config['model'].get('use_motionbert', False)
+    MODEL_MOTIONBERT_PATH = config['model'].get('motionbert_path', '')
+
+    # Hyperparameters
     SEQ_LEN = config['hyperparameters']['seq_len']
     NUM_JOINTS = config['hyperparameters']['num_joints']
     CONFIDENCE_THRESH = config['hyperparameters']['confidence_thresh']
     
+    # Smart Crop
+    SMART_CROP = config['model'].get('smart_crop', False)
+    
     # 1. Setup Directory
     os.makedirs(DATA_PROCESSED_DIR, exist_ok=True)
     
-    # --- REUSE EXISTING 2D DATA LOGIC ---
+    # 2. Reuse existing 2D data if specified and add depth via MotionBERT
     if reuse_2d:
         X_path = os.path.join(DATA_PROCESSED_DIR, 'X.npy')
         if os.path.exists(X_path):
             print(f"\n[INFO] Reusing existing 2D data from {X_path}")
             X_old = np.load(X_path)
             
-            # Formato atteso (N, T, V, C) per iterazione
-            if X_old.ndim == 4 and X_old.shape[1] < 5: # Probabile (N, C, T, V)
+            # Normalization of shapes: target (N, T, V, C)
+            
+            # Case 1: 5D (N, T, M, V, C) - remove M if 1
+            if X_old.ndim == 5 and X_old.shape[2] == 1:
+                print(f"Detected 5D format (N, T, M, V, C): {X_old.shape}. Squeezing M...")
+                X_old = X_old.squeeze(2)
+            
+            # Case 2: (N, C, T, V) - Transpose to (N, T, V, C)
+            if X_old.ndim == 4 and X_old.shape[1] < 10: 
                  print(f"Detected (N, C, T, V) format: {X_old.shape}. Transposing...")
                  X_old = X_old.transpose(0, 2, 3, 1)
             
             print(f"Loaded data shape: {X_old.shape}")
             
-            use_motionbert = config['model'].get('use_motionbert', False)
-            if use_motionbert:
+            if USE_MOTIONBERT:
                 from src.motionbert_extractor import MotionBERTExtractor
-                mb_path = config['model'].get('motionbert_path', '')
                 try:
-                    lifter = MotionBERTExtractor(checkpoint_path=mb_path)
+                    lifter = MotionBERTExtractor(checkpoint_path=MODEL_MOTIONBERT_PATH)
                 except Exception as e:
                     print(f"Lifter Init Error: {e}")
-                    lifter = MotionBERTExtractor(checkpoint_path=mb_path)
+                    lifter = MotionBERTExtractor(checkpoint_path=MODEL_MOTIONBERT_PATH)
 
                 if lifter.valid:
                     print("Lifting 2D Keypoints to 3D...")
@@ -70,6 +84,7 @@ def main(config_path, reuse_2d=False):
                         X_new.append(sample_final)
                     
                     X = np.array(X_new, dtype=np.float32)
+                    # The new shape should be (N, T, V, C) where C is now 3 (x,y,z) or 4 (x,y,z,conf)
                     print(f"New 3D Data Shape: {X.shape}")
                     
                     if os.path.exists(X_path) and os.access(os.path.dirname(X_path), os.W_OK):
@@ -79,11 +94,7 @@ def main(config_path, reuse_2d=False):
                          local_output_dir = os.path.join(os.getcwd(), 'data', 'processed')
                          os.makedirs(local_output_dir, exist_ok=True)
                          X_path = os.path.join(local_output_dir, 'X.npy')
-                    
-                    # Converti per salvare nel formato del dataset (N, C, T, V) ? 
-                    # Dataset.py si aspetta (N, C, T, V) in __init__ ma fa permute se serve?
-                    # prepare_data di solito salva (N, T, V, C) e src/dataset.py in __init__ fa permute(0, 3, 1, 2)
-                    
+
                     print(f"Saving 3D data to {X_path}...")
                     np.save(X_path, X)
                     
@@ -110,23 +121,22 @@ def main(config_path, reuse_2d=False):
     # 2. Extractor Initialization
     print(f"Initialization Pose Extractor...")
     
-    use_motionbert = config['model'].get('use_motionbert', False)
-    
     try:
-        if use_motionbert:
+        if USE_MOTIONBERT:
             print(" Using MotionBERT for 3D Lifting...")
             from src.motionbert_extractor import MotionBERTIntegratedExtractor
-            mb_path = config['model'].get('motionbert_path', '')
             extractor = MotionBERTIntegratedExtractor(
-                yolo_path=MODEL_YOLO_PATH,
-                motionbert_ckpt=mb_path
+                yolo_path=MODEL_POSE_EXTRACTOR_PATH,
+                motionbert_ckpt=MODEL_MOTIONBERT_PATH,
+                smart_crop=SMART_CROP
             )
         else:
             extractor = PoseExtractor(
-                model_path=MODEL_YOLO_PATH,
+                model_path=MODEL_POSE_EXTRACTOR_PATH,
                 seq_len=SEQ_LEN,
                 num_joints=NUM_JOINTS,
-                confidence_thresh=CONFIDENCE_THRESH
+                confidence_thresh=CONFIDENCE_THRESH,
+                smart_crop=SMART_CROP
             )
     except Exception as e:
         print(f"Error during model loading: {e}")
@@ -155,6 +165,15 @@ def main(config_path, reuse_2d=False):
         kpts = extractor.extract_sequence(video_path)
         
         if kpts is not None:
+             # Remove player dimension if present (T, M, V, C) -> (T, V, C)
+             # This ensures only the main player is kept
+            if kpts.ndim == 4 and kpts.shape[1] == 1:
+                kpts = kpts.squeeze(1)
+            elif kpts.ndim == 4 and kpts.shape[1] > 1:
+                # If multiple players were detected but we only want one
+                # extract_sequence typically sorts likely targets, so take 0
+                kpts = kpts[:, 0, :, :]
+                
             X_data.append(kpts)
             y_data.append(label)
             

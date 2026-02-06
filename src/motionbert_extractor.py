@@ -282,31 +282,41 @@ class MotionBERTExtractor:
 
 class MotionBERTIntegratedExtractor:
     """
-    Integrates YOLO (via PoseExtractor) + MotionBERT Lifting.
+    Integrates YOLO-Pose (via PoseExtractor) + MotionBERT 3D Lifting.
+    
+    Simplified integrated pipeline:
+    1. Extract 2D keypoints with PoseExtractor (single player, COCO-17)
+    2. Lift to 3D with MotionBERT
+    3. Return (T, V, 4) with x, y, z, conf in COCO topology
     """
-    def __init__(self, yolo_path, motionbert_ckpt, device='cuda'):
+    def __init__(self, yolo_path, motionbert_ckpt, device='cuda', smart_crop=False):
         from src.extractor import PoseExtractor
         
-        self.pose_extractor = PoseExtractor(model_path=yolo_path, device=device)
+        self.pose_extractor = PoseExtractor(
+            model_path=yolo_path, 
+            device=device,
+            smart_crop=smart_crop
+        )
         self.lifter = MotionBERTExtractor(checkpoint_path=motionbert_ckpt, device=device)
         
     def extract_sequence(self, video_path):
-        # 1. Get 2D Keypoints (T, 17, 3) -> x, y, conf
+        """
+        Extract 3D pose sequence from video.
+        
+        Returns:
+            (T, V, 4) array with x, y, z, conf in COCO-17 format
+        """
+        # 1. Get 2D Keypoints (T, V, 3) -> x, y, conf
         kpts_2d = self.pose_extractor.extract_sequence(video_path)
         
         if kpts_2d is None or len(kpts_2d) == 0:
             return None
             
-        if isinstance(kpts_2d, list):
-            kpts_2d = np.array(kpts_2d)
-        
-        # 2. Lift to 3D
-        # Pass (x, y, score) or just (x, y) depending on training
-        # Usually passing all 3 channels is safer if model handles it
+        # 2. Lift to 3D (returns COCO topology)
         kpts_3d = self.lifter.lift_2d_to_3d_coco(kpts_2d)
         
-        # 3. Merge Confidence
-        conf = kpts_2d[:, :, 2:3] # (T, V, 1)
-        kpts_final = np.concatenate([kpts_3d, conf], axis=2) # (T, V, 4) -> x, y, z, conf
+        # 3. Merge confidence channel
+        conf = kpts_2d[:, :, 2:3]  # (T, V, 1)
+        kpts_final = np.concatenate([kpts_3d, conf], axis=2)  # (T, V, 4) -> x, y, z, conf
         
         return kpts_final

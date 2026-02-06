@@ -113,6 +113,9 @@ def main(config_path):
     TTA_AUGMENTATIONS = evaluation_config['tta_augmentations']
     IN_CHANNELS = model_config['in_channels']
     RANDOM_SEED = config['training']['random_seed']
+    VAL_SPLIT = training_config.get('val_split', 0.2)
+    NUM_WORKERS = training_config.get('num_workers', 2)
+    DROPOUT = model_config.get('dropout', 0.5)
     
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -144,13 +147,13 @@ def main(config_path):
     
     # 2. Reconstruct test split (identical to training: seed 42)
     _, X_test, _, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=RANDOM_SEED, stratify=y
+        X, y, test_size=VAL_SPLIT, random_state=RANDOM_SEED, stratify=y
     )
     print(f"Test set: {len(X_test)} samples\n")
     
     # 3. Create test dataset and dataloader
     test_dataset = TennisDataset(X_test, y_test, augment=False, data_type=MODALITY)
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
     
     # 4. Load config to determine model type
     model_config = config.get('model_hyperparameters', {})
@@ -161,9 +164,9 @@ def main(config_path):
     from src.model import HDGCN_Tennis, CTRGCN_Tennis  # Ensure both are imported
 
     if model_type == 'HDGCN':
-        model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=0.5)
+        model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT)
     elif model_type == 'CTRGCN':
-        model = CTRGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=0.5)
+        model = CTRGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT)
     else:
         raise ValueError(f"Unknown model type in config: {model_type}")
     

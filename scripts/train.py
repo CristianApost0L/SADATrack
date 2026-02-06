@@ -85,35 +85,46 @@ def save_plots(history, output_dir='runs'):
         plt.close()
 
 def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num_classes=None, device=None):
-    """Run training for a single fold or train/val split"""
+    """Run training for a single fold or single train/val split"""
+
+    # Extract configurations
     training_config = config['training']
     model_config = config['model_hyperparameters']
     output_config = config['output']
     
+    # Training hyperparameters
     BATCH_SIZE = training_config['batch_size']
     EPOCHS = training_config['epochs']
     LEARNING_RATE = training_config['learning_rate']
     WEIGHT_DECAY = training_config['weight_decay']
+    DROPOUT = model_config['dropout']
+    IN_CHANNELS = model_config['in_channels']
     RANDOM_SEED = training_config['random_seed']
     NUM_WORKERS = training_config['num_workers']
     EARLY_STOPPING_PATIENCE = training_config.get('early_stopping_patience', 10)
     CHECKPOINT_FREQUENCY = training_config.get('checkpoint_frequency', 5)
+
+    # Type of skeleton data (joint, bone)
     MODALITY = training_config.get('modality', 'joint')
+
+    # Model type (HDGCN, CTRGCN, etc.)
+    MODEL_TYPE = model_config.get('model_hyperparameters', 'HDGCN')
     
     # Curriculum learning settings
     USE_CURRICULUM = training_config.get('use_curriculum_learning', False)
     CURRICULUM_SCHEDULE = training_config.get('curriculum_schedule', 'linear')
     
-    DROPOUT = model_config['dropout']
-    IN_CHANNELS = model_config['in_channels']
+    # Augmentation settings
+    USE_AUGMENTATION = training_config.get('augment', True)
+    ROBUST_VALIDATION = training_config.get('robust_validation', True)
+    DEFAULT_AUG_STRENGTH = training_config.get('default_augmentation_strength', 'medium')
     
     # Modify paths if k-fold
     if fold_idx is not None:
         fold_base = output_config.get('folds_output_dir', 'runs/kfold_results')
         model_name, ext = os.path.splitext(output_config['model_save_path'])
         
-        # Use model type in filename if available
-        current_model_type = model_config.get('type', 'HDGCN')
+        current_model_type = MODEL_TYPE
         filename = f'best_model_{current_model_type.lower()}{ext}'
         
         MODEL_SAVE_PATH = os.path.join(fold_base, f'fold_{fold_idx}', filename)
@@ -134,8 +145,47 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
         print(f"  Class {idx}: {weight:.4f}")
     
     # Create datasets and dataloaders
-    train_dataset = TennisDataset(X_train, y_train, augment=True, data_type=MODALITY)
+    train_dataset = TennisDataset(X_train, y_train, augment=USE_AUGMENTATION, data_type=MODALITY)
     val_dataset = TennisDataset(X_val, y_val, augment=False, data_type=MODALITY)
+
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+    
+    val_robust_loader = None
+    if ROBUST_VALIDATION:
+        val_dataset_robust = TennisDataset(X_val, y_val, augment=False, data_type=MODALITY, force_back_view_val=True)
+        val_robust_loader = DataLoader(val_dataset_robust, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+    
+    # Create handedness robustness loader (forced flip)
+    val_handedness_loader = None
+    if USE_AUGMENTATION:
+        val_dataset_handedness = TennisDataset(X_val, y_val, augment=False, data_type=MODALITY, force_flip_val=True)
+        val_handedness_loader = DataLoader(val_dataset_handedness, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+    
+    print(f"\n[INFO] Dataset Augmentation Configuration:")
+    if USE_AUGMENTATION:
+        print(f"       Status: ENABLED")
+        print(f"       - 3D View Simulation:")
+        print(f"         * Back View Sim:      {train_dataset.aug_probs.get('apply_back_view', False)}")
+        print(f"         * 3D Pose Rotation:   {train_dataset.aug_probs.get('apply_pose_rotation', False)} (Range: +/- {train_dataset.aug_probs.get('rotation_range', 0)} deg)")
+        
+        print(f"       - Geometric:")
+        print(f"         * Horizontal Flip:    {train_dataset.aug_probs.get('flip_prob', 0.0):.2f} (prob)")
+        print(f"         * Global Scaling:     +/- {train_dataset.aug_probs.get('scale_range', 0.0):.2f}")
+        print(f"         * Shearing:           {train_dataset.aug_probs.get('apply_shearing', False)}")
+        print(f"         * Local Zoom:         {train_dataset.aug_probs.get('apply_local_zoom', False)}")
+        
+        print(f"       - Temporal:")
+        print(f"         * Temporal Crop:      {train_dataset.aug_probs.get('apply_temporal_crop', False)}")
+        print(f"         * Temporal Scaling:   {train_dataset.aug_probs.get('apply_temporal_scaling', False)}")
+        print(f"         * Frame Dropping:     {train_dataset.aug_probs.get('apply_frame_dropping', False)}")
+        
+        print(f"       - Noise/Robustness:")
+        print(f"         * Gaussian Noise:     Std {train_dataset.aug_probs.get('noise_std', 0.0)}")
+        print(f"         * Local Jitter:       {train_dataset.aug_probs.get('apply_local_jitter', False)}")
+        print(f"         * Keypoint Dropout:   {train_dataset.aug_probs.get('apply_keypoint_dropout', False)}")
+        print(f"         * Confidence Mask:    {train_dataset.aug_probs.get('apply_confidence_mask', False)}")
+    else:
+        print(f"       Status: DISABLED")
     
     # Initialize curriculum learning scheduler if enabled
     curriculum_scheduler = None
@@ -145,15 +195,14 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
         print(f"       Schedule type: {CURRICULUM_SCHEDULE}")
         print(f"       Augmentation will progressively increase from weak -> strong")
     else:
-        train_dataset.set_augmentation_strength('medium')
+        train_dataset.set_augmentation_strength(DEFAULT_AUG_STRENGTH)
         print(f"\n[INFO] Curriculum Learning DISABLED")
-        print(f"       Using medium augmentation strength")
+        print(f"       Using {DEFAULT_AUG_STRENGTH} augmentation strength")
     
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, drop_last=True)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
     
     # Initialize model
-    model_type = model_config.get('type', 'HDGCN')
+    model_type = MODEL_TYPE
     print(f"\n[INFO] Initializing model: {model_type}")
     
     if model_type == 'HDGCN':
@@ -267,11 +316,55 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
         val_recall = recall_score(all_labels_val, all_preds_val, average='weighted', zero_division=0)
         val_f1 = f1_score(all_labels_val, all_preds_val, average='weighted', zero_division=0)
         
+        val_robust_f1 = None
+        val_handedness_f1 = None
+        
+        # --- ROBUST VALIDATION (Back View) ---
+        # Test performance on forced back view data to ensure model robustness to viewpoint changes
+        if ROBUST_VALIDATION and val_robust_loader is not None:
+            all_preds_robust = []
+            all_labels_robust = []
+            with torch.no_grad():
+                for inputs, labels in val_robust_loader:
+                    inputs, labels = inputs.to(device), labels.to(device)
+                    outputs = model(inputs)
+                    _, predicted = outputs.max(1)
+                    all_preds_robust.extend(predicted.cpu().numpy())
+                    all_labels_robust.extend(labels.cpu().numpy())
+            
+            val_robust_f1 = f1_score(all_labels_robust, all_preds_robust, average='weighted', zero_division=0)
+        
+        # --- HANDEDNESS ROBUSTNESS (Left-Handed Simulation) ---
+        # Test performance on FLIPPED validation data to ensure the model generalizes to left-handed players
+        if val_handedness_loader is not None:
+            all_preds_handedness = []
+            all_labels_handedness = []
+            with torch.no_grad():
+                for inputs, labels in val_handedness_loader:
+                    inputs, labels = inputs.to(device), labels.to(device)
+                    outputs = model(inputs)
+                    _, predicted = outputs.max(1)
+                    all_preds_handedness.extend(predicted.cpu().numpy())
+                    all_labels_handedness.extend(labels.cpu().numpy())
+            
+            val_handedness_f1 = f1_score(all_labels_handedness, all_preds_handedness, average='weighted', zero_division=0)
+        
+        # Combined robust score (average of back view and handedness)
+        final_robust_score = val_f1
+        if val_robust_f1 is not None and val_handedness_f1 is not None:
+            final_robust_score = (val_f1 + val_robust_f1 + val_handedness_f1) / 3.0
+        elif val_robust_f1 is not None:
+            final_robust_score = (val_f1 + val_robust_f1) / 2.0
+        elif val_handedness_f1 is not None:
+            final_robust_score = (val_f1 + val_handedness_f1) / 2.0
+
         # Update learning rate
         scheduler.step()
         
         # Log and save
-        print(f"End Epoch {epoch+1}: Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f} | Val F1: {val_f1:.4f} | LR: {scheduler.get_last_lr()[0]:.6f}")
+        robust_str = f"{val_robust_f1:.4f}" if val_robust_f1 is not None else "N/A"
+        handedness_str = f"{val_handedness_f1:.4f}" if val_handedness_f1 is not None else "N/A"
+        print(f"End Epoch {epoch+1}: Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f} | Val F1: {val_f1:.4f} | Robust(Back): {robust_str} | Handedness(Flip): {handedness_str} | LR: {scheduler.get_last_lr()[0]:.6f}")
         
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
@@ -284,12 +377,18 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
         history['train_recall'].append(train_recall)
         history['val_recall'].append(val_recall)
         
-        # Save best model (based on F1 score)
-        if val_f1 > best_f1:
-            best_f1 = val_f1
+        # Combined Score for Best Model Selection
+        # We weigh all robustness metrics (back view + handedness)
+        combined_score = final_robust_score
+        
+        # Save best model
+        if combined_score > best_f1:
+            best_f1 = combined_score
             patience_counter = 0  # Reset early stopping counter
             torch.save(model.state_dict(), MODEL_SAVE_PATH)
-            print(f"--> New best model saved! (F1: {best_f1:.4f}, Acc: {val_acc:.4f})")
+            robust_log = f", Back:{val_robust_f1:.4f}" if val_robust_f1 is not None else ""
+            handedness_log = f", Flip:{val_handedness_f1:.4f}" if val_handedness_f1 is not None else ""
+            print(f"--> New best model saved! (Comb: {combined_score:.4f} [Val:{val_f1:.4f}{robust_log}{handedness_log}])")
         else:
             patience_counter += 1
         
@@ -345,9 +444,6 @@ def train(config_path, k_folds=None):
     
     print(f"Training started on: {DEVICE}")
     
-    # PATCH: Prioritize local processed data in Kaggle/Read-only environments
-    # Check if a local writable version exists and prefer it over the config path
-    # This handles the case where config points to /kaggle/input (read-only) but we generated new data
     local_processed_dir = os.path.join(os.getcwd(), 'data', 'processed')
     if os.path.exists(os.path.join(local_processed_dir, 'X.npy')):
         print(f"[INFO] Found locally processed data in {local_processed_dir}. Using this instead of config path.")
@@ -403,9 +499,8 @@ def train(config_path, k_folds=None):
         run_training_fold(X_train, y_train, X_val, y_val, config, 
                          fold_idx=None, num_classes=num_classes, device=DEVICE)
 
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Train HDGCN model for swing classification')
+    parser = argparse.ArgumentParser(description='Train the Tennis Swing Classifier')
     parser.add_argument('--config', type=str, default='config.yaml',
                         help='Path to config YAML file (default: config.yaml)')
     parser.add_argument('--kfold', type=int, default=None,
