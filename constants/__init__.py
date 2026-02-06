@@ -26,3 +26,10 @@ BATCH_SIZE = 12
 TEMP_CLIP_DIR = "/kaggle/working/temp_processing_clips"
 PROCESSED_CLIP_DIR = "/kaggle/working/output_videos/clips"
 CLIP_DURATION = 60 #seconds
+
+ACTION_MODEL_PATH = '/kaggle/input/cv-project/new_Swing_classifier.pth'
+PLAYER_TRACKER_PATH = '/kaggle/input/cv-project/yolo26x.pt'
+BALL_TRACKER_PATH = '/kaggle/input/cv-project/ball_model_best.pt'
+BOUNCE_TRACKER_PATH = '/kaggle/input/cv-project/ctb_regr_bounce.cbm'
+COURT_DETECTOR_PATH = '/kaggle/input/cv-project/keypoints_model.pth'
+YOLO_POSE_PATH = '/kaggle/input/cv-project/yolo26x-pose.pt'

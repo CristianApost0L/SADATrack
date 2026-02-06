@@ -40,7 +40,16 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.tolist()
         return super(NumpyEncoder, self).default(obj)
 
-def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbosity, player_detection_court_margin, original_video_name, p1_handedness, p2_handedness, frame_offset=0, last_known_positions=None):
+def process_single_clip(input_video, 
+                        output_path, 
+                        HDGCN_window_size, 
+                        yolo_verbosity, 
+                        player_detection_court_margin, 
+                        original_video_name, 
+                        p1_handedness, 
+                        p2_handedness, 
+                        frame_offset=0, 
+                        last_known_positions=None):
     start_time = time.time()
 
     model_predictions_log = []
@@ -52,7 +61,7 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     extractor = PoseExtractor()
 
     action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
-    action_model.load_state_dict(torch.load('/kaggle/input/cv-project/new_Swing_classifier.pth'))
+    action_model.load_state_dict(torch.load(constants.ACTION_MODEL_PATH))
     action_model.eval()
     
     # --- DUAL STREAM SETUP ---
@@ -65,11 +74,11 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
 
 
     # Initialize Trackers
-    player_tracker = PlayerTracker(model_path='/kaggle/input/cv-project/yolo26x.pt')
+    player_tracker = PlayerTracker(model_path=constants.PLAYER_TRACKER_PATH)
     
-    ball_tracker = BallTracker(model_path='/kaggle/input/cv-project/ball_model_best.pt') # Amin model
+    ball_tracker = BallTracker(model_path=constants.BALL_TRACKER_PATH) # Amin model
 
-    bounce_detector = BounceDetector(model_path='/kaggle/input/cv-project/ctb_regr_bounce.cbm') # Amin model
+    bounce_detector = BounceDetector(model_path=constants.BOUNCE_TRACKER_PATH) # Amin model
 
     # --- 2. DETECT PLAYERS (Use ENHANCED frames) ---
     print("Detecting Players on Enhanced Video...")
@@ -155,9 +164,7 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
 
     # --- 4. COURT DETECTION (Use ENHANCED frames) ---
     # Lines are often faint, so contrast enhancement helps here too
-    court_model_path = "/kaggle/input/cv-project/keypoints_model.pth"
-    court_line_detector = CourtLineDetector(court_model_path)
-    
+    court_line_detector = CourtLineDetector(court_model_path = constants.COURT_DETECTOR_PATH)
     court_infer_interval = constants.COURT_INFER_INTERVAL
     print(f"Detecting court lines every {court_infer_interval} frames...")
     
@@ -183,7 +190,7 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
         last_known_positions=last_known_positions 
     )
 
-    pose_estimator = YOLO('/kaggle/input/cv-project/yolo26x-pose.pt')
+    pose_estimator = YOLO(constants.YOLO_POSE_PATH)
 
     print("Running Pose Estimation on detected players (BATCHED)...")
     
@@ -396,8 +403,10 @@ def process_single_clip(input_video, output_path, HDGCN_window_size, yolo_verbos
     except Exception as e:
         print(f"   ⚠️ Could not save detection JSON: {e}")
 
+
     # MiniCourt
     mini_court = MiniCourt(raw_frames[0]) 
+
 
     # Detect ball shots
     ball_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
