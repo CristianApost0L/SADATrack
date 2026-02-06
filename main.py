@@ -164,7 +164,7 @@ def process_single_clip(input_video,
 
     # --- 4. COURT DETECTION (Use ENHANCED frames) ---
     # Lines are often faint, so contrast enhancement helps here too
-    court_line_detector = CourtLineDetector(court_model_path = constants.COURT_DETECTOR_PATH)
+    court_line_detector = CourtLineDetector(constants.COURT_DETECTOR_PATH)
     court_infer_interval = constants.COURT_INFER_INTERVAL
     print(f"Detecting court lines every {court_infer_interval} frames...")
     
