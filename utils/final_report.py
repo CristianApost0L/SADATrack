@@ -286,6 +286,7 @@ def save_clean_validation_clips(original_video_path, model_predictions_log, gold
             gt_shot = gt['shot'].lower()
             pred_shot = match['shot'].lower()
             pred_shot_str = match['shot']
+            player_str = f"p{match['player']}"
 
             if gt_shot == pred_shot and player_ok: status_str = "PERFECT"
             elif player_ok:
@@ -304,7 +305,7 @@ def save_clean_validation_clips(original_video_path, model_predictions_log, gold
         end_f_proc = center_frame_processed + clip_window
 
         # Append _clean to filename
-        clip_name = f"{video_name}_Frame_{gt['frame']:04d}_{status_str}_Exp_{clean_gt}_Found_{clean_pred}_clean.mp4"
+        clip_name = f"{video_name}_Frame_{gt['frame']:04d}_{player_str}_{status_str}_Exp_{clean_gt}_Found_{clean_pred}_clean.mp4"
         clip_path = os.path.join(val_clips_dir, clip_name)
         
         # Prepare Writer (at Processed FPS, e.g. 24)
