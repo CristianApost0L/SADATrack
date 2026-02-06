@@ -181,7 +181,7 @@ class BallTracker:
         
         return output_video_frames
     
-    def find_ball_shot_frames(self, video_frames, player_detections):
+    def find_ball_shot_frames(self, video_frames, player_detections, bounce_detector):
         '''
         All-in-one complete function that takes video in and returns frames where the ball was shot
         
@@ -204,7 +204,7 @@ class BallTracker:
         # 2. Detect Bounces using the new Model
         detected_bounces = []
         # Pass the list of (x,y) tuples directly
-        detected_bounces = self.predict(ball_detections) 
+        detected_bounces = bounce_detector.predict(ball_detections) 
 
         # 3. Filter: Keep a candidate ONLY if it is NOT a bounce
         clean_candidates = []
@@ -252,4 +252,4 @@ class BallTracker:
 
         print(f"Refined Shots: {len(ball_shot_frames)} (Filtered noise by Proximity)")
 
-        return ball_shot_frames
+        return ball_detections, ball_shot_frames, detected_bounces

@@ -88,8 +88,11 @@ def process_single_clip(input_video,
     bounce_detector = BounceDetector(model_path=constants.BOUNCE_TRACKER_PATH) # Amin model
 
     print("Detecting Ball on Raw Video...")
-    ball_shot_frames = BallTracker.find_ball_shot_frames(ball_tracker, raw_frames, player_detections)
-    
+    ball_detections, ball_shot_frames, detected_bounces = ball_tracker.find_ball_shot_frames(
+        raw_frames, 
+        player_detections, 
+        bounce_detector
+    )
     print("Unloading Ball Tracker model to free VRAM...")
     del ball_tracker.model
     torch.cuda.empty_cache()
@@ -338,10 +341,6 @@ def process_single_clip(input_video,
 
     # MiniCourt
     mini_court = MiniCourt(raw_frames[0]) 
-
-
-    # Detect ball shots
-    ball_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
 
     # --- FIX: CONVERT POINTS TO BOXES ---
     # MiniCourt and Draw functions expect Bounding Boxes [x1, y1, x2, y2],
