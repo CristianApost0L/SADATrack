@@ -30,7 +30,8 @@ from utils import (read_video,
                    export_json,
                    )
 
-def process_single_clip(input_video, 
+def process_single_clip(recognition_model,
+                        input_video, 
                         output_path, 
                         HDGCN_window_size, 
                         yolo_verbosity, 
@@ -49,20 +50,20 @@ def process_single_clip(input_video,
 
     # Initialize Action Classifier
     extractor = PoseExtractor()
-    '''
-    action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
-    action_model.load_state_dict(torch.load(constants.ACTION_MODEL_PATH))
-    action_model.eval()
-    '''
-    action_model = CTRGCN_Tennis(
-        num_classes=12, 
-        in_channels=3,
-        drop_out=0.5
-    )
-
-    # Load weights
-    checkpoint = torch.load('/kaggle/input/cv-project/Swing_classifier_joint_final_test.pth')
-    action_model.load_state_dict(checkpoint)
+    if "CTRGCN" in recognition_model:
+        action_model = CTRGCN_Tennis(
+            num_classes=12, 
+            in_channels=3,
+            drop_out=0.5
+        )
+        # Load weights
+        checkpoint = torch.load(constants.CTRGCN_PATH)
+        action_model.load_state_dict(checkpoint)
+    else:
+        action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
+        action_model.load_state_dict(torch.load(constants.ACTION_MODEL_PATH))
+        action_model.eval()
+    
 
     # --- DUAL STREAM SETUP ---
     # Stream A: Raw Frames (Clean, low noise) -> BEST FOR BALL DETECTION
@@ -301,6 +302,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process a video file from a specific path using a specific window size and YOLO verbosity.")
     
     # Add the path argument
+    parser.add_argument("--recognition-model", type=str, choices=["HDGCN","CTRGCN"], default="HDGCN", help="Choose swing recognition model")
     parser.add_argument("--path", type=str, default = "/kaggle/input/tennis-rally-videos/input_video.mp4", help="The full path to the video file", required=True)
     parser.add_argument("--output-path", type=str, default = "/kaggle/working/output_videos", help="The full path to the output", required=False)
     parser.add_argument("--window-size", type=int, default = 40, help="The HDGCN shot recognition window size", required=True)
@@ -375,6 +377,7 @@ if __name__ == "__main__":
 
         # Process the clip
         clip_preds_list, last_clip_positions = process_single_clip(
+            recognition_model=args.recognition_model,
             input_video=clip_path,
             output_path=output_clip_path,
             HDGCN_window_size=args.window_size,
