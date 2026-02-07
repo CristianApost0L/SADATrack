@@ -13,6 +13,7 @@ from trackers import PlayerTracker, BallTracker, BounceDetector
 from court_line_detector import CourtLineDetector
 from mini_court import MiniCourt
 from action_recognition.model import HDGCN_Tennis
+from action_recognition.ctr_gcn_model import CTRGCN_Tennis
 from action_recognition.extractor import PoseExtractor
 from action_recognition.shot_predictor import predict_shot
 from action_recognition.pose_estimator import estimate_poses
@@ -48,11 +49,21 @@ def process_single_clip(input_video,
 
     # Initialize Action Classifier
     extractor = PoseExtractor()
-
+    '''
     action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
     action_model.load_state_dict(torch.load(constants.ACTION_MODEL_PATH))
     action_model.eval()
-      
+    '''
+    action_model = CTRGCN_Tennis(
+        num_classes=12, 
+        in_channels=3,
+        drop_out=0.5
+    )
+
+    # Load weights
+    checkpoint = torch.load('/kaggle/input/cv-project/Swing_classifier_joint_final_test.pth')
+    action_model.load_state_dict(checkpoint)
+
     # --- DUAL STREAM SETUP ---
     # Stream A: Raw Frames (Clean, low noise) -> BEST FOR BALL DETECTION
     raw_frames = read_video(input_video_path)
