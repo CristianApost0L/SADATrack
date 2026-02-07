@@ -306,8 +306,8 @@ if __name__ == "__main__":
     parser.add_argument("--window-size", type=int, default = 40, help="The HDGCN shot recognition window size", required=True)
     parser.add_argument("--yolo-verbosity", action='store_true', help="Enable YOLO verbose logging")
     parser.add_argument("--player-detection-court-margin", type=int, default = 300, help="Court margin for detecting players and excluding line judges (in pixels)", required=True)
-    parser.add_argument("--p1-handedness", type=str, choices=['right', 'left'], default='right', help="Player 1 (Bottom) handedness")
-    parser.add_argument("--p2-handedness", type=str, choices=['right', 'left'], default='right', help="Player 2 (Top) handedness")
+    parser.add_argument("--p1-handedness", type=str, choices=['right', 'left'], help="Player 1 (Bottom) handedness")
+    parser.add_argument("--p2-handedness", type=str, choices=['right', 'left'], help="Player 2 (Top) handedness")
     parser.add_argument("--save-validation-clips", action='store_true', help="Extract and save video clips for every validation event")
     parser.add_argument("--save-clean-validation-clips", action='store_true', help="Extract and save CLEAN video clips (no overlays) for every validation event")
 

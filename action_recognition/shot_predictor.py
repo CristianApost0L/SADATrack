@@ -157,44 +157,46 @@ def predict_shot(extractor,
         # 1. Determine current shooter's handedness
         shooter_hand = p1_handedness if mapped_shooter_id == 1 else p2_handedness
 
-        # 2. Get positions (Center X)
-        p_bbox = player_detections[start_frame][player_shot_ball]['bbox']
-        p_center_x = (p_bbox[0] + p_bbox[2]) / 2
+        # --- Only apply mask if handedness is explicitly provided ---
+        if shooter_hand is not None:
+            # 2. Get positions (Center X)
+            p_bbox = player_detections[start_frame][player_shot_ball]['bbox']
+            p_center_x = (p_bbox[0] + p_bbox[2]) / 2
 
-        b_box = ball_detections[start_frame][1]
-        b_center_x = (b_box[0] + b_box[2]) / 2
+            b_box = ball_detections[start_frame][1]
+            b_center_x = (b_box[0] + b_box[2]) / 2
 
-        # 3. Determine if ball is on the "Forehand Side" geometrically
-        # Note: P1 (Bottom) faces UP (North). P2 (Top) faces DOWN (South).
-        is_forehand_side = False
+            # 3. Determine if ball is on the "Forehand Side" geometrically
+            # Note: P1 (Bottom) faces UP (North). P2 (Top) faces DOWN (South).
+            is_forehand_side = False
 
-        if mapped_shooter_id == 1: # Bottom Player (Faces Away/Up)
-            if shooter_hand == 'right':
-                # Righty facing up: Ball on Right (Screen X > Player X) is Forehand
-                if b_center_x > p_center_x: is_forehand_side = True
-            else: 
-                # Lefty facing up: Ball on Left (Screen X < Player X) is Forehand
-                if b_center_x < p_center_x: is_forehand_side = True
+            if mapped_shooter_id == 1: # Bottom Player (Faces Away/Up)
+                if shooter_hand == 'right':
+                    # Righty facing up: Ball on Right (Screen X > Player X) is Forehand
+                    if b_center_x > p_center_x: is_forehand_side = True
+                else: 
+                    # Lefty facing up: Ball on Left (Screen X < Player X) is Forehand
+                    if b_center_x < p_center_x: is_forehand_side = True
 
-        else: # Top Player (Faces Camera/Down)
-            if shooter_hand == 'right':
-                # Righty facing down: Ball on Screen LEFT is their Right side (Forehand)
-                if b_center_x < p_center_x: is_forehand_side = True
+            else: # Top Player (Faces Camera/Down)
+                if shooter_hand == 'right':
+                    # Righty facing down: Ball on Screen LEFT is their Right side (Forehand)
+                    if b_center_x < p_center_x: is_forehand_side = True
+                else:
+                    # Lefty facing down: Ball on Screen RIGHT is their Left side (Forehand)
+                    if b_center_x > p_center_x: is_forehand_side = True
+
+            # 4. Apply Mask
+            if is_forehand_side:
+                # If geometry says Forehand, ban Backhand classes
+                for idx, class_name in enumerate(constants.THETIS_CLASSES):
+                    if "backhand" in class_name:
+                            output[0][idx] = -float('inf')
             else:
-                # Lefty facing down: Ball on Screen RIGHT is their Left side (Forehand)
-                if b_center_x > p_center_x: is_forehand_side = True
-
-        # 4. Apply Mask
-        if is_forehand_side:
-            # If geometry says Forehand, ban Backhand classes
-            for idx, class_name in enumerate(constants.THETIS_CLASSES):
-                if "backhand" in class_name:
-                        output[0][idx] = -float('inf')
-        else:
-            # If geometry says Backhand, ban Forehand classes
-            for idx, class_name in enumerate(constants.THETIS_CLASSES):
-                if "forehand" in class_name:
-                        output[0][idx] = -float('inf')
+                # If geometry says Backhand, ban Forehand classes
+                for idx, class_name in enumerate(constants.THETIS_CLASSES):
+                    if "forehand" in class_name:
+                            output[0][idx] = -float('inf')
         # -----------------------------
 
         prediction_idx = torch.argmax(output, dim=1).item()
