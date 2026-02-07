@@ -59,11 +59,12 @@ def process_single_clip(recognition_model,
         # Load weights
         checkpoint = torch.load(constants.CTRGCN_PATH)
         action_model.load_state_dict(checkpoint)
+        print("Loaded CTRGCN swing recognition model")
     else:
         action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
         action_model.load_state_dict(torch.load(constants.ACTION_MODEL_PATH))
         action_model.eval()
-    
+        print("Loaded HDGCN swing recognition model")    
 
     # --- DUAL STREAM SETUP ---
     # Stream A: Raw Frames (Clean, low noise) -> BEST FOR BALL DETECTION
