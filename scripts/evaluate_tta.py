@@ -37,7 +37,7 @@ def load_data(data_processed_dir):
         print(f"ERROR loading data: {e}")
         sys.exit(1)
 
-def plot_confusion_matrix(y_true, y_pred, class_names, save_path):
+def plot_confusion_matrix(y_true, y_pred, class_names, save_path, title='Confusion Matrix'):
     """Generate and save confusion matrix"""
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(12, 10))
@@ -46,7 +46,7 @@ def plot_confusion_matrix(y_true, y_pred, class_names, save_path):
                 cbar_kws={'label': 'Count'})
     plt.xlabel('Predicted Class', fontsize=12)
     plt.ylabel('True Class', fontsize=12)
-    plt.title('Confusion Matrix - HD-GCN (with TTA)', fontsize=14, fontweight='bold')
+    plt.title(title, fontsize=14, fontweight='bold')
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
     plt.savefig(save_path, dpi=150)
@@ -256,13 +256,15 @@ def main(config_path):
     # Save report
     report_path = os.path.join(EVALUATION_DIR, f"report_{'tta' if TTA_ENABLED else 'standard'}.txt")
     with open(report_path, 'w') as f:
+        f.write(f"Model: {model_type}\n")
         f.write(f"Accuracy: {accuracy:.4f}\n")
         f.write(f"TTA Enabled: {TTA_ENABLED}\n\n")
         f.write(report)
     
     # Save confusion matrix
+    cm_title = f"Confusion Matrix - {model_type} {'(with TTA)' if TTA_ENABLED else ''}"
     cm_path = os.path.join(EVALUATION_DIR, f"confusion_matrix_{'tta' if TTA_ENABLED else 'standard'}.png")
-    plot_confusion_matrix(all_labels, all_preds, class_names, cm_path)
+    plot_confusion_matrix(all_labels, all_preds, class_names, cm_path, title=cm_title)
     
     print(f"\nResults saved to: {EVALUATION_DIR}")
 

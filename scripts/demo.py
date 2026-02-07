@@ -159,6 +159,9 @@ def main(args):
     data_config = config['data']
     model_config = config['model_hyperparameters']
     
+    # Confidence threshold for swing detection
+    CONFIDENCE_THRESHOLD = args.confidence
+    
     DATA_PROCESSED_DIR = data_config['processed_dir']
     
     local_processed_dir = os.path.join(os.getcwd(), 'data', 'processed')
@@ -365,14 +368,27 @@ def main(args):
                         pred_buffer.append(probs.cpu().numpy())
                         avg_probs = np.mean(np.array(pred_buffer), axis=0).flatten()
                         top_loc = np.argmax(avg_probs)
-                        last_label = idx_to_label[top_loc]
-                        last_conf = avg_probs[top_loc]
+                        top_conf = avg_probs[top_loc]
+                        
+                        # Only update label if confidence is above threshold
+                        if top_conf >= CONFIDENCE_THRESHOLD:
+                            last_label = idx_to_label[top_loc]
+                            last_conf = top_conf
+                        else:
+                            # Low confidence - likely transition or no clear swing
+                            last_label = "Uncertain"
+                            last_conf = top_conf
 
         # === VISUALIZATION (Runs Every Frame) ===
         # Uses last_* variables for persistent drawing
         if last_detected_pose is not None:
             norm, raw, confs, box = last_detected_pose
-            color = (0, 255, 0)
+            
+            # Color based on prediction confidence
+            if last_conf >= CONFIDENCE_THRESHOLD:
+                color = (0, 255, 0)  # Green: High confidence
+            else:
+                color = (0, 165, 255)  # Orange: Low confidence
             
             draw_skeleton(frame, raw[:, :2], confs, modality=modality, color=color)
             cv2.rectangle(frame, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), color, 2)
@@ -408,6 +424,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', default='config.yaml')
     parser.add_argument('--pose_model', default=None)
     parser.add_argument('--output', default='demo_results/')
+    parser.add_argument('--confidence', type=float, default=0.5, help='Confidence threshold for swing detection (0.0-1.0, default: 0.5)')
     
     args = parser.parse_args()
     main(args)
