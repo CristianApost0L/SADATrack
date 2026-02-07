@@ -82,6 +82,7 @@ class CTRGCN_Tennis(nn.Module):
             num_class=num_classes,
             num_point=COCO_NUM_JOINTS,
             num_person=1,
+            graph='action_recognition.ctr_gcn_model.GraphCTR',
             graph_args={'labeling_mode': 'spatial'},
             in_channels=in_channels,
             drop_out=drop_out,
