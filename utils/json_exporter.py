@@ -43,9 +43,11 @@ def export_json(player_id_map, player_detections, original_video_name):
         for i, frame_detections in enumerate(player_detections):
             frame_boxes = []
             for track_id, data in frame_detections.items():
+                keypoints = data.get('keypoints', [])
                 frame_boxes.append({
                     "track_id": track_id,
-                    "bbox": data['bbox']
+                    "bbox": data['bbox'],
+                    "keypoints": keypoints
                 })
             # Use string keys for frames to be valid JSON
             export_data["frames"][i] = frame_boxes
