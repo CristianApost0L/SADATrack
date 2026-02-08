@@ -62,22 +62,9 @@ def process_single_clip(recognition_model,
         print("Loaded CTRGCN swing recognition model")
     else:
         action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
-        
-        # Load the checkpoint
-        checkpoint = torch.load(constants.ACTION_MODEL_PATH)
-        
-        # FIX: Remove 'model.' prefix if present
-        new_state_dict = {}
-        for k, v in checkpoint.items():
-            if k.startswith("model."):
-                name = k[6:] # Remove the first 6 characters ("model.")
-            else:
-                name = k
-            new_state_dict[name] = v
-            
-        action_model.load_state_dict(new_state_dict)
+        action_model.load_state_dict(torch.load(constants.ACTION_MODEL_PATH))
         action_model.eval()
-        print("Loaded HDGCN swing recognition model (with prefix fix)")
+        print("Loaded HDGCN swing recognition model")    
 
     # --- DUAL STREAM SETUP ---
     # Stream A: Raw Frames (Clean, low noise) -> BEST FOR BALL DETECTION
