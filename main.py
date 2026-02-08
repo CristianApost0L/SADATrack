@@ -63,21 +63,30 @@ def process_single_clip(recognition_model,
     else:
         action_model = HDGCN_Tennis(num_classes=12, in_channels=3)
         
-        # Load the checkpoint
+        # Load the raw checkpoint
         checkpoint = torch.load(constants.ACTION_MODEL_PATH)
-        
-        # FIX: Remove 'model.' prefix if present
         new_state_dict = {}
+
+        # --- FIX: Transform keys to match current model definition ---
         for k, v in checkpoint.items():
-            if k.startswith("model."):
-                name = k[6:] # Remove the first 6 characters ("model.")
-            else:
-                name = k
-            new_state_dict[name] = v
+            # 1. Strip 'model.' prefix if present
+            name = k[6:] if k.startswith("model.") else k
             
+            # 2. Rename 'conv_d' to 'conv' (Graph Convolution layers)
+            # The checkpoint uses 'conv_d', but model.py uses 'conv'
+            name = name.replace(".conv_d.", ".conv.")
+            
+            # 3. Relocate Residual Bias
+            # Checkpoint has 'residual.conv.bias', Model expects 'residual.bias'
+            if "residual.conv.bias" in name:
+                name = name.replace("residual.conv.bias", "residual.bias")
+            
+            new_state_dict[name] = v
+        # -------------------------------------------------------------
+
         action_model.load_state_dict(new_state_dict)
         action_model.eval()
-        print("Loaded HDGCN swing recognition model (with prefix fix)")
+        print("Loaded HDGCN swing recognition model (with key transformations)")
 
     # --- DUAL STREAM SETUP ---
     # Stream A: Raw Frames (Clean, low noise) -> BEST FOR BALL DETECTION
