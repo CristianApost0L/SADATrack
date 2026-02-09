@@ -9,17 +9,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
-# Aggiungi la directory del progetto al Python path
-script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(script_dir)
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
 # Add project root to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from src.normalization import normalize_skeleton
 from src.dataset import get_thetis_files, THETIS_CLASSES
 from src.extractor import PoseExtractor
+from src.constants import SKELETON_CONNECTIONS
 from ultralytics import YOLO
 
 def load_config(config_path):
@@ -30,35 +26,14 @@ def load_config(config_path):
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
-# COCO skeleton connections (17 keypoints)
-# Used to draw lines between keypoints
-SKELETON_CONNECTIONS = [
-    (15, 13), (13, 11), (16, 14), (14, 12), (11, 12), # Legs and Hips
-    (5, 11), (6, 12), (5, 6),                         # Torso
-    (5, 7), (7, 9), (6, 8), (8, 10),                  # Arms
-    (5, 0), (6, 0), (1, 0), (2, 0), (3, 1), (4, 2)    # Head
-]
-
-# Alternative skeleton connections for debugging
-COCO_CONNECTIONS = [
-    (0, 1), (0, 2), (1, 3), (2, 4),      # Head
-    (5, 6), (5, 7), (7, 9), (6, 8), (8, 10), # Arms
-    (11, 12), (5, 11), (6, 12),          # Torso
-    (11, 13), (13, 15), (12, 14), (14, 16) # Legs
-]
-
-
-
 def visualize_validation(video_path, extractor, confidence_thresh=0.25, output_dir='runs/validation'):
     """
     Performs frame-by-frame extraction and saves visualization video.
-    Does not use _post_process (padding) to maintain synchronization with the original video.
-    
+
     Args:
         video_path: Path to the video file
         extractor: PoseExtractor instance
-        confidence_thresh: Confidence threshold for YOLO detection
-
+        confidence_thresh: Confidence threshold for Pose Estimation
         output_dir: Directory to save output video
     """
     cap = cv2.VideoCapture(video_path)
@@ -69,7 +44,6 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, output_d
     frames_rgb = []
     frames_norm = []
     frames_raw = []
-    frames_3d = []
 
     print(f"Processing: {os.path.basename(video_path)}...")
     
@@ -81,11 +55,10 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, output_d
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frames_rgb.append(frame_rgb)
         
-        # --- EXTRACTION (Logic replicated from Extractor for debugging) ---
-        # Using the extractor's model
+        # Extraction
         results = extractor.model(frame, verbose=False, conf=confidence_thresh)
         
-        norm_kpts = np.zeros((17, 3)) # Default empty
+        norm_kpts = np.zeros((17, 3)) # Default empty (will be filled by normalize_skeleton)
         raw_kpts = np.zeros((17, 3))
 
         if results and len(results[0].boxes) > 0:
@@ -95,15 +68,9 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, output_d
             
             # Raw data
             raw_kpts = results[0].keypoints.data[best_idx].cpu().numpy()
-            box_h = results[0].boxes.xywh[best_idx, 3].item()
-            box_center = results[0].boxes.xywh[best_idx, :2].cpu().numpy()
 
-            # 2. Normalization (Call protected method for testing)
-            norm_kpts = extractor._normalize(raw_kpts, box_h, box_center)
-
-        frames_norm.append(norm_kpts)
+        frames_norm.append(norm_kpts)  # Placeholder, will be replaced by normalization
         frames_raw.append(raw_kpts)
-        frames_3d.append(None)  # Placeholder, will compute 3D after all frames extracted
 
     cap.release()
     
@@ -113,21 +80,41 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, output_d
     
     print(f"✓ Extracted {len(frames_rgb)} frames")
     
-    # --- ANIMATION SETUP (2D only) ---
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    # Apply normalization to the entire sequence
+    print("Applying normalization ...")
     
+    # Convert list to array (T, V, C)
+    raw_sequence = np.array(frames_raw, dtype=np.float32)
+    
+    # Apply normalize_skeleton: (T, V, C) -> (C, T, V) -> normalize -> (T, V, C)
+    if raw_sequence.shape[0] > 0:
+        seq_transposed = raw_sequence.transpose(2, 0, 1)  # (C, T, V)
+        seq_normalized = normalize_skeleton(seq_transposed)  # (C, T, V)
+        frames_norm = seq_normalized.transpose(1, 2, 0)  # (T, V, C)
+        frames_norm = [frames_norm[i] for i in range(len(frames_norm))]  # Convert back to list
+        print(f"✓ Normalization applied: torso-based scaling, centered on hips")
+    
+    # Animation setup
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
     fig.suptitle(f"Validation: {os.path.basename(video_path)} ({len(frames_rgb)} frames)", fontsize=14)
 
-    # Left plot: Original Video
-    ax1.set_title("Input Video + YOLO Raw")
+    # Left: Raw keypoints on video
+    ax1.set_title("Raw Keypoints (Video Frame)", fontsize=12)
+    ax1.axis('off')
     im_display = ax1.imshow(frames_rgb[0])
     lines_raw = [ax1.plot([], [], 'c-', linewidth=2)[0] for _ in SKELETON_CONNECTIONS]
     points_raw = ax1.scatter([], [], c='r', s=10)
 
-    # Right plot: Normalized Space
-    ax2.set_title("Normalized Input")
+    # Right: Normalized skeleton
+    ax2.set_title("Robust Normalization (Torso-based)", fontsize=12)
+    ax2.set_xlabel("X")
+    ax2.set_ylabel("Y (flipped)")
+    ax2.grid(True, alpha=0.3)
+    ax2.axhline(0, color='gray', linewidth=0.5)
+    ax2.axvline(0, color='gray', linewidth=0.5)
+    ax2.set_aspect('equal')
     ax2.set_xlim(-1.0, 1.0)
-    ax2.set_ylim(-1.0, 1.0) # We invert Y in the plot because in CV Y grows downward
+    ax2.set_ylim(-1.0, 1.0)
     ax2.grid(True)
     ax2.axhline(0, color='black', lw=1)
     ax2.axvline(0, color='black', lw=1)
@@ -137,18 +124,16 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, output_d
     
     # Testo info
     info_text = ax2.text(-0.9, 0.9, "", fontsize=9)
-    
-
 
     def update(frame_idx):
-        # 1. Update Video
+        # Update Video
         im_display.set_data(frames_rgb[frame_idx])
         
         # Current data
         r_kpts = frames_raw[frame_idx]
         n_kpts = frames_norm[frame_idx]
         
-        # --- Update Raw Skeleton (on Video) ---
+        # Update Raw Skeleton (on Video)
         x_raw, y_raw, conf_raw = r_kpts[:, 0], r_kpts[:, 1], r_kpts[:, 2]
         
         # Update lines
@@ -157,13 +142,12 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, output_d
                 line.set_data([x_raw[i], x_raw[j]], [y_raw[i], y_raw[j]])
             else:
                 line.set_data([], [])
+
         # Update points
         mask_r = conf_raw > 0.1
         points_raw.set_offsets(np.c_[x_raw[mask_r], y_raw[mask_r]])
 
-        # --- Update Normalized Skeleton (su Grafico) ---
-        # NOTA: Invertiamo la Y (-y) per visualizzarlo "in piedi" nel grafico cartesiano
-        # (perché nei video la Y cresce verso il basso, nei grafici verso l'alto)
+        # Update Normalized Skeleton
         x_norm, y_norm, conf_norm = n_kpts[:, 0], n_kpts[:, 1], n_kpts[:, 2]
         
         for line, (i, j) in zip(lines_norm, SKELETON_CONNECTIONS):
@@ -175,9 +159,21 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, output_d
         mask_n = conf_norm > 0.1
         points_norm.set_offsets(np.c_[x_norm[mask_n], -y_norm[mask_n]])
         
-        # Check centering (Bacino)
-        hip_x = (x_norm[11] + x_norm[12]) / 2
-        info_text.set_text(f"Frame: {frame_idx}\nHip Center X: {hip_x:.3f}")
+        # Check centering and scaling (from normalization)
+        hip_x = (x_norm[11] + x_norm[12]) / 2 if conf_norm[11] > 0.1 and conf_norm[12] > 0.1 else 0
+        hip_y = (y_norm[11] + y_norm[12]) / 2 if conf_norm[11] > 0.1 and conf_norm[12] > 0.1 else 0
+        
+        # Torso length (shoulder to hip center)
+        if conf_norm[5] > 0.1 and conf_norm[6] > 0.1:
+            shoulder_x = (x_norm[5] + x_norm[6]) / 2
+            shoulder_y = (y_norm[5] + y_norm[6]) / 2
+            torso_len = np.sqrt((shoulder_x - hip_x)**2 + (shoulder_y - hip_y)**2)
+            info_text.set_text(f"Frame: {frame_idx}\n"
+                             f"Hip Center: ({hip_x:.3f}, {hip_y:.3f})\n"
+                             f"Torso Length: {torso_len:.3f}")
+        else:
+            info_text.set_text(f"Frame: {frame_idx}\n"
+                             f"Hip Center: ({hip_x:.3f}, {hip_y:.3f})")
         
         return [im_display, points_raw, points_norm] + lines_raw + lines_norm
 
@@ -213,8 +209,7 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, output_d
 
 def debug_prepared_data(data_path='data/processed/X.npy', output_dir='runs/debug'):
     """
-    Debug prepared data to check if the format is correct (COCO vs H36M).
-    Visualizes skeleton connections for both formats.
+    Debug prepared data to check if the format is COCO and show the normalization.
     
     Args:
         data_path: Path to the prepared X.npy file
@@ -230,7 +225,8 @@ def debug_prepared_data(data_path='data/processed/X.npy', output_dir='runs/debug
             data_path = local_path
             print(f"Found data at {local_path}. Using this path instead.")
         else:
-            return
+            print("No data found. Please run 'python scripts/prepare_data.py' first.")
+            return 
 
     print("\n=== PREPARED DATA DEBUG ===")
     print(f"Loading data from: {data_path}")
@@ -389,7 +385,7 @@ def main(config_path, mode='video', output_dir=None, num_videos=None, process_al
 
     print(f"\nFound {len(samples)} videos in dataset")
 
-    # Determine processing mode
+    # 3. Determine processing mode
     if video_path:
         # Single video mode
         if not os.path.exists(video_path):

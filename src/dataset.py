@@ -21,7 +21,6 @@ __all__ = [
     'LABEL_MAP',
 ]
 
-
 class TennisDataset(Dataset):
     """
     PyTorch Dataset for Tennis Swing Classification.
@@ -29,7 +28,7 @@ class TennisDataset(Dataset):
     Supports:
     - Data augmentation with comprehensive pipeline
     - Bone representation (vectors between joints)
-    - Forced augmentations for validation (back view, flip)
+    - Forced augmentations for validation (flip)
     """
     
     def __init__(self, X, y, augment=False, augmentation_probs=None, data_type='joint', 

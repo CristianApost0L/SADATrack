@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split, StratifiedKFold
-from sklearn.metrics import precision_score, recall_score, f1_score, classification_report
+from sklearn.metrics import precision_score, recall_score, f1_score
 from sklearn.utils.class_weight import compute_class_weight
 import matplotlib.pyplot as plt
 
@@ -198,6 +198,14 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
     model_type = MODEL_TYPE
     print(f"\n[INFO] Initializing model: {model_type}")
     
+    # Re-seed before model initialization for reproducibility
+    # (Important for K-fold and to match evaluate_tta.py)
+    torch.manual_seed(RANDOM_SEED)
+    torch.cuda.manual_seed(RANDOM_SEED)
+    torch.cuda.manual_seed_all(RANDOM_SEED)
+    np.random.seed(RANDOM_SEED)
+    random.seed(RANDOM_SEED)
+    
     if model_type == 'HDGCN':
         model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT)
     elif model_type == 'CTRGCN':
@@ -230,7 +238,7 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
             # Update scheduler state
             curriculum_scheduler.step(epoch)
             
-            # Log milestone when strength changes
+            # Log when strength changes
             if curriculum_scheduler.just_changed():
                 strength = curriculum_scheduler.get_current_strength()
                 aug_params = curriculum_scheduler.get_augmentation_params(epoch)
@@ -342,7 +350,7 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
             
             val_handedness_f1 = f1_score(all_labels_handedness, all_preds_handedness, average='weighted', zero_division=0)
         
-        # Combined robust score (handedness only, back view removed)
+        # Combined robust score
         final_robust_score = val_f1
         if val_handedness_f1 is not None:
             final_robust_score = (val_f1 + val_handedness_f1) / 2.0

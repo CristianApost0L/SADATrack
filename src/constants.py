@@ -41,6 +41,22 @@ KP_R_KNEE = 14
 KP_L_ANKLE = 15
 KP_R_ANKLE = 16
 
+# COCO-17 joint names
+COCO_JOINT_NAMES = [
+    'Nose', 'L_Eye', 'R_Eye', 'L_Ear', 'R_Ear',
+    'L_Shoulder', 'R_Shoulder', 'L_Elbow', 'R_Elbow',
+    'L_Wrist', 'R_Wrist', 'L_Hip', 'R_Hip',
+    'L_Knee', 'R_Knee', 'L_Ankle', 'R_Ankle'
+]
+
+# COCO skeleton connections for visualization (indices)
+SKELETON_CONNECTIONS = [
+    (15, 13), (13, 11), (16, 14), (14, 12), (11, 12), # Legs
+    (5, 11), (6, 12), (5, 6),                         # Torso
+    (5, 7), (7, 9), (6, 8), (8, 10),                  # Arms
+    (5, 0), (6, 0), (1, 0), (2, 0), (3, 1), (4, 2)    # Head
+]
+
 # Mapping from class name to label index
 LABEL_MAP = {cls_name: i for i, cls_name in enumerate(THETIS_CLASSES)}
 

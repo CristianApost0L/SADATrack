@@ -5,6 +5,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from constants import COCO_JOINT_NAMES
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -40,7 +41,6 @@ def analyze_dataset(config_path):
     
     if not os.path.exists(X_path):
         print(f"ERROR: Data not found at {DATA_PROCESSED_DIR}")
-        print(f"Please run 'python scripts/prepare_data.py' first")
         return
     
     X = np.load(X_path)
@@ -63,7 +63,7 @@ def analyze_dataset(config_path):
     
     print(f"\nClass Distribution:")
     for class_idx, count in zip(unique, counts):
-        class_idx = int(class_idx)  # Convert to standard Python int
+        class_idx = int(class_idx)
         class_name = label_map.get(class_idx, f"Class {class_idx}")
         percentage = (count / total_samples) * 100
         bar_length = int(percentage / 2)
@@ -93,45 +93,8 @@ def analyze_dataset(config_path):
     # Analyze confidence values (if available)
     analyze_confidence(X, y, label_map, ANALYSIS_OUTPUT_DIR)
 
-def create_distribution_plot(label_map, counts, output_dir='runs/analysis'):
-    """Create and save class distribution plot"""
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Invert label_map: from {class_name: index} to {index: class_name}
-    index_to_name = {v: k for k, v in label_map.items()}
-    class_names = [index_to_name.get(i, f"Class {i}") for i in range(len(label_map))]
-    
-    fig, ax = plt.subplots(figsize=(12, 6))
-    bars = ax.bar(class_names, counts, color='steelblue', alpha=0.8)
-    
-    # Add value labels on bars
-    for bar in bars:
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2., height,
-                f'{int(height)}',
-                ha='center', va='bottom', fontsize=10)
-    
-    ax.set_xlabel('Class', fontsize=12)
-    ax.set_ylabel('Number of Samples', fontsize=12)
-    ax.set_title('Class Distribution', fontsize=14, fontweight='bold')
-    ax.grid(axis='y', alpha=0.3)
-    plt.xticks(rotation=45, ha='right')
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'class_distribution.png'), dpi=150)
-    print(f"Class distribution plot saved to: {os.path.join(output_dir, 'class_distribution.png')}")
-    plt.close()
-
 def analyze_confidence(X, y, label_map, output_dir='runs/analysis'):
     """Analyze confidence values for each joint and swing class"""
-    
-    # COCO-17 joint names
-    COCO_JOINT_NAMES = [
-        'Nose', 'L_Eye', 'R_Eye', 'L_Ear', 'R_Ear',
-        'L_Shoulder', 'R_Shoulder', 'L_Elbow', 'R_Elbow',
-        'L_Wrist', 'R_Wrist', 'L_Hip', 'R_Hip',
-        'L_Knee', 'R_Knee', 'L_Ankle', 'R_Ankle'
-    ]
     
     print(f"\n{'='*60}")
     print(f"Confidence Analysis")
@@ -162,7 +125,7 @@ def analyze_confidence(X, y, label_map, output_dir='runs/analysis'):
         print(f"Confidence analysis requires at least 3 channels (X, Y, Confidence)")
         return
     
-    # Extract confidence channel (3rd channel: X, Y, Conf format)
+    # Extract confidence channel
     confidences = X_analysis[:, :, :, 2]  # (N, T, V)
     
     print(f"\nConfidence statistics:")
@@ -227,12 +190,41 @@ def analyze_confidence(X, y, label_map, output_dir='runs/analysis'):
     else:
         print(f"  None (all joints > {threshold})")
     
-    # Create visualizations
+    # Create plots
     create_confidence_heatmap(conf_per_class_joint, label_map, COCO_JOINT_NAMES, output_dir)
     create_confidence_barplot(overall_joint_conf, COCO_JOINT_NAMES, output_dir)
     create_confidence_boxplot(confidences, y, label_map, output_dir)
     
     print(f"\n{'='*60}\n")
+
+def create_distribution_plot(label_map, counts, output_dir='runs/analysis'):
+    """Create and save class distribution plot"""
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Invert label_map: from {class_name: index} to {index: class_name}
+    index_to_name = {v: k for k, v in label_map.items()}
+    class_names = [index_to_name.get(i, f"Class {i}") for i in range(len(label_map))]
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    bars = ax.bar(class_names, counts, color='steelblue', alpha=0.8)
+    
+    # Add value labels on bars
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{int(height)}',
+                ha='center', va='bottom', fontsize=10)
+    
+    ax.set_xlabel('Class', fontsize=12)
+    ax.set_ylabel('Number of Samples', fontsize=12)
+    ax.set_title('Class Distribution', fontsize=14, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+    plt.xticks(rotation=45, ha='right')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'class_distribution.png'), dpi=150)
+    print(f"Class distribution plot saved to: {os.path.join(output_dir, 'class_distribution.png')}")
+    plt.close()
 
 def create_confidence_heatmap(conf_matrix, label_map, joint_names, output_dir='runs/analysis'):
     """Create heatmap of confidence per class and joint"""

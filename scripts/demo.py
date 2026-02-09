@@ -12,8 +12,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.model import HDGCN_Tennis, CTRGCN_Tennis
 from src.extractor import PoseExtractor
-from src.dataset import COCO_BONE_PAIRS, normalize_skeleton
-from src.constants import COCO_SWAP_PAIRS
+from src.normalization import normalize_skeleton
+from src.constants import COCO_BONE_PAIRS, COCO_SWAP_PAIRS, SKELETON_CONNECTIONS
 
 def load_config(config_path):
     """Load YAML configuration file"""
@@ -22,15 +22,6 @@ def load_config(config_path):
     
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
-
-# COCO skeleton connections for visualization (indices)
-SKELETON_CONNECTIONS = [
-    (15, 13), (13, 11), (16, 14), (14, 12), (11, 12), # Legs
-    (5, 11), (6, 12), (5, 6),                         # Torso
-    (5, 7), (7, 9), (6, 8), (8, 10),                  # Arms
-    (5, 0), (6, 0), (1, 0), (2, 0), (3, 1), (4, 2)    # Head
-]
-
 
 def load_label_map(data_processed_dir):
     path = os.path.join(data_processed_dir, 'label_map.npy')
@@ -59,8 +50,6 @@ def draw_skeleton(frame, kpts, confs, modality='joint', color=(0, 255, 0)):
             if confs[i] > 0.25:
                 c = (0, 0, 255) if draw_bones else (0, 255, 0)
                 cv2.circle(frame, (int(kpts[i, 0]), int(kpts[i, 1])), 4, c, -1)
-
-
 
 def flip_keypoints_horizontal(kpts):
     """
@@ -141,7 +130,7 @@ def main(args):
     SMART_CROP = config['model'].get('smart_crop', False)
     SEQ_LEN = config['hyperparameters'].get('seq_len', 40)
     IN_CHANNELS = model_config['in_channels']
-    
+
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     label_map = load_label_map(DATA_PROCESSED_DIR)
@@ -163,7 +152,7 @@ def main(args):
     elif modality == 'bone':
         classifier_bone = init_model(model_type, weights_paths[0].strip(), num_classes, IN_CHANNELS, DEVICE)
 
-    print(f"Loading Pose Estimator (YOLO-Pose)...")
+    print(f"Loading Pose Estimator ...")
     pose_model_path = args.pose_model if args.pose_model else POSE_MODEL_PATH
     extractor = PoseExtractor(
         model_path=pose_model_path,
@@ -190,11 +179,10 @@ def main(args):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output_path, fourcc, fps, (width , height))
     
-    # State Management (2D only)
     # Target effective FPS ~30
     target_fps = 30
     stride = max(1, int(round(fps / target_fps)))
-    mode_str = "2D Mode" + (" | Back View Correction Enabled" if BACK_VIEW else "")
+    mode_str = "Back View Correction Enabled" if BACK_VIEW else ""
     print(f"Video FPS: {fps}, Target FPS: {target_fps}, Stride: {stride}  [{mode_str}]")
 
     # Single player tracking
@@ -216,63 +204,13 @@ def main(args):
         # === UPDATE LOGIC (Only on Stride) ===
         if frame_idx % stride == 0:
             
-            # A. Detection - Use YOLO-Pose directly
-            results = extractor.model(frame, verbose=False, conf=extractor.CONFIDENCE_THRESH)
+            # A. Detection - Use Pose extractor directly
+            kpts_raw, xyxy = extractor.detect_frame(frame)
             
             current_frame_pose = None
-            
-            if results and len(results[0].boxes) > 0:
-                # Select the largest person (foreground player)
-                boxes = results[0].boxes
-                areas = boxes.xywh[:, 2] * boxes.xywh[:, 3]
-                best_idx = torch.argmax(areas).item()
-                
-                box = boxes[best_idx]
-                xyxy = box.xyxy.cpu().numpy()[0]
-                x1, y1, x2, y2 = xyxy
-                
-                # Smart Crop for better resolution
-                process_frame = frame
-                offset_x, offset_y = 0, 0
-                if extractor.smart_crop:
-                    h_img, w_img = frame.shape[:2]
-                    box_w, box_h = x2 - x1, y2 - y1
-                    pad_w, pad_h = box_w * 0.2, box_h * 0.2
-                    crop_x1 = max(0, int(x1 - pad_w))
-                    crop_y1 = max(0, int(y1 - pad_h))
-                    crop_x2 = min(w_img, int(x2 + pad_w))
-                    crop_y2 = min(h_img, int(y2 + pad_h))
-                    process_frame = frame[crop_y1:crop_y2, crop_x1:crop_x2]
-                    offset_x, offset_y = crop_x1, crop_y1
-                    
-                    # Re-run pose estimation on cropped region
-                    pose_results = extractor.model(process_frame, verbose=False, conf=0.1)
-                    
-                    if pose_results and len(pose_results[0].boxes) > 0:
-                        crop_areas = pose_results[0].boxes.xywh[:, 2] * pose_results[0].boxes.xywh[:, 3]
-                        crop_best = torch.argmax(crop_areas).item()
-                        kpts_raw = pose_results[0].keypoints.data[crop_best].cpu().numpy()
-                        p_box_h = pose_results[0].boxes.xywh[crop_best, 3].item()
-                        p_center = pose_results[0].boxes.xywh[crop_best, :2].cpu().numpy()
-                        
-                        # Remap to original frame coordinates
-                        kpts_raw[:, 0] += offset_x
-                        kpts_raw[:, 1] += offset_y
-                        p_center[0] += offset_x
-                        p_center[1] += offset_y
-                    else:
-                        # Fallback to initial detection
-                        kpts_raw = results[0].keypoints.data[best_idx].cpu().numpy()
-                        p_box_h = boxes.xywh[best_idx, 3].item()
-                        p_center = boxes.xywh[best_idx, :2].cpu().numpy()
-                else:
-                    # No smart crop
-                    kpts_raw = results[0].keypoints.data[best_idx].cpu().numpy()
-                    p_box_h = boxes.xywh[best_idx, 3].item()
-                    p_center = boxes.xywh[best_idx, :2].cpu().numpy()
-                
-                # Normalize keypoints
-                norm_kpts = extractor._normalize(kpts_raw, p_box_h, p_center)
+            if kpts_raw is not None:
+                # Store raw keypoints (normalization applied later to full sequence)
+                norm_kpts = kpts_raw
                 
                 # Apply back-view correction if enabled
                 if BACK_VIEW:
@@ -297,8 +235,9 @@ def main(args):
                 
                 if non_zero_frames > SEQ_LEN // 2:
                     
-                    # Normalize
-                    input_seq_transposed = input_seq.transpose(2, 0, 1)  # (C, T, V)
+                    # Apply robust normalization to full sequence (same as training)
+                    # This normalizes based on mean torso length across all frames
+                    input_seq_transposed = input_seq.transpose(2, 0, 1)  # (T,V,C) -> (C,T,V)
                     input_seq_normalized = normalize_skeleton(input_seq_transposed)
                     
                     input_tensor = torch.tensor(input_seq_normalized).unsqueeze(0).to(DEVICE)

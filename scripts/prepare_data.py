@@ -9,6 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.extractor import PoseExtractor
 from src.dataset import get_thetis_files
+from src.normalization import normalize_skeleton
 
 def load_config(config_path):
     """Load YAML configuration file"""
@@ -37,8 +38,6 @@ def main(config_path):
     
     # 1. Setup Directory
     os.makedirs(DATA_PROCESSED_DIR, exist_ok=True)
-    
-
 
     # 2. Extractor Initialization (2D only)
     print(f"Initialization Pose Extractor...")
@@ -82,8 +81,16 @@ def main(config_path):
                 # If multiple players were detected but we only want one
                 # extract_sequence typically sorts likely targets, so take 0
                 kpts = kpts[:, 0, :, :]
+            
+            # Apply robust normalization
+            # Convert (T, V, C) -> (C, T, V) for normalize_skeleton
+            kpts_transposed = kpts.transpose(2, 0, 1)
+            kpts_normalized = normalize_skeleton(kpts_transposed)  # (C, T, V)
+            
+            # Convert back to (T, V, C)
+            kpts_final = kpts_normalized.transpose(1, 2, 0)
                 
-            X_data.append(kpts)
+            X_data.append(kpts_final)
             y_data.append(label)
             
     # 5. Saving Data
