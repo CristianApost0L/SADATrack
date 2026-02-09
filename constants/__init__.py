@@ -29,9 +29,7 @@ JSON_OUTPUT_DIR = "/kaggle/working/detections"
 CLIP_DURATION = 60 #seconds
 
 ACTION_MODEL_PATH = '/kaggle/input/cv-project/new_Swing_classifier.pth'
-#CTRGCN_PATH = '/kaggle/input/cv-project/Swing_classifier_joint_final_test.pth'
-#CTRGCN_PATH = '/kaggle/input/cv-project/Swing_classifier_joint_CTRGCN_08_02.pth'
-CTRGCN_PATH = '/kaggle/input/cv-project/Swing_classifier_joint_CTRGCN_09_02.pth'
+CTRGCN_PATH = '/kaggle/input/cv-project/Swing_classifier_joint_CTRGCN_08_02.pth'
 PLAYER_TRACKER_PATH = '/kaggle/input/cv-project/yolo26x.pt'
 BALL_TRACKER_PATH = '/kaggle/input/cv-project/ball_model_best.pt'
 BOUNCE_TRACKER_PATH = '/kaggle/input/cv-project/ctb_regr_bounce.cbm'
