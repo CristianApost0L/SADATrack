@@ -38,7 +38,6 @@ env/
 
 # Jupyter Notebook
 .ipynb_checkpoints/
-*.ipynb
 
 # Data and models
 data/
@@ -67,3 +66,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.log
+
+rallies/
+
+cv_env
