@@ -96,7 +96,9 @@ def predict_shot(extractor,
 
     # 3. Normalize using the class instance
     # You need to initialize 'extractor = PoseExtractor()' before the loop (see Fix #4)
-    normalized_input = extractor.process_sequence(sequence_data)
+    should_flip_skeleton = (mapped_shooter_id == 1) # Flip if it is P1 (Bottom/Close)
+    
+    normalized_input = extractor.process_sequence(sequence_data, should_flip=should_flip_skeleton)
     
     # Convert to tensor (N, C, T, V)
     inp_tensor = torch.from_numpy(normalized_input).unsqueeze(0).float()

@@ -1,3 +1,6 @@
+import sys
+sys.path.append('../') # Ensure we can find constants
+import constants
 import numpy as np
 
 class PoseExtractor:
@@ -5,7 +8,7 @@ class PoseExtractor:
         self.SEQ_LEN = 40
         self.NUM_JOINTS = 17
         
-    def process_sequence(self, sequence_data):
+    def process_sequence(self, sequence_data, should_flip=False):
         """
         Processes a sequence of raw keypoints and bounding boxes.
         
@@ -38,6 +41,19 @@ class PoseExtractor:
                 box_center = np.array([(x1 + x2) / 2.0, (y1 + y2) / 2.0])
                 frame_kpts = self._normalize(kpts_np, box_h, box_center)
             
+                # --- NEW FLIP LOGIC ---
+                if should_flip:
+                    # 1. Flip X-axis (invert sign since it is already centered)
+                    frame_kpts[:, 0] *= -1 
+                    
+                    # 2. Swap Left/Right Keypoints (e.g., Left Shoulder <-> Right Shoulder)
+                    # Use a temp copy to swap correctly
+                    temp_kpts = frame_kpts.copy()
+                    for (i, j) in constants.COCO_SWAP_PAIRS:
+                         frame_kpts[i] = temp_kpts[j]
+                         frame_kpts[j] = temp_kpts[i]
+                # ----------------------
+
             frames_data.append(frame_kpts)
         
         return self._post_process(frames_data)
