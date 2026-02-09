@@ -116,7 +116,6 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
     
     # Augmentation settings
     USE_AUGMENTATION = training_config.get('augment', True)
-    ROBUST_VALIDATION = training_config.get('robust_validation', True)
     DEFAULT_AUG_STRENGTH = training_config.get('default_augmentation_strength', 'medium')
     
     # Modify paths if k-fold
@@ -150,11 +149,6 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
 
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
     
-    val_robust_loader = None
-    if ROBUST_VALIDATION:
-        val_dataset_robust = TennisDataset(X_val, y_val, augment=False, data_type=MODALITY, force_back_view_val=True)
-        val_robust_loader = DataLoader(val_dataset_robust, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
-    
     # Create handedness robustness loader (forced flip)
     val_handedness_loader = None
     if USE_AUGMENTATION:
@@ -164,12 +158,9 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
     print(f"\n[INFO] Dataset Augmentation Configuration:")
     if USE_AUGMENTATION:
         print(f"       Status: ENABLED")
-        print(f"       - 3D View Simulation:")
-        print(f"         * Back View Sim:      {train_dataset.aug_probs.get('apply_back_view', False)}")
-        print(f"         * 3D Pose Rotation:   {train_dataset.aug_probs.get('apply_pose_rotation', False)} (Range: +/- {train_dataset.aug_probs.get('rotation_range', 0)} deg)")
-        
         print(f"       - Geometric:")
         print(f"         * Horizontal Flip:    {train_dataset.aug_probs.get('flip_prob', 0.0):.2f} (prob)")
+        print(f"         * Global Rotation:    +/- {train_dataset.aug_probs.get('rotation_range', 0)} degrees")
         print(f"         * Global Scaling:     +/- {train_dataset.aug_probs.get('scale_range', 0.0):.2f}")
         print(f"         * Shearing:           {train_dataset.aug_probs.get('apply_shearing', False)}")
         print(f"         * Local Zoom:         {train_dataset.aug_probs.get('apply_local_zoom', False)}")
@@ -182,8 +173,10 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
         print(f"       - Noise/Robustness:")
         print(f"         * Gaussian Noise:     Std {train_dataset.aug_probs.get('noise_std', 0.0)}")
         print(f"         * Local Jitter:       {train_dataset.aug_probs.get('apply_local_jitter', False)}")
+        print(f"         * Bone Scaling:       {train_dataset.aug_probs.get('apply_bone_scaling', False)}")
         print(f"         * Keypoint Dropout:   {train_dataset.aug_probs.get('apply_keypoint_dropout', False)}")
         print(f"         * Confidence Mask:    {train_dataset.aug_probs.get('apply_confidence_mask', False)}")
+        print(f"         * Confidence Jitter:  {train_dataset.aug_probs.get('apply_confidence_jitter', False)}")
     else:
         print(f"       Status: DISABLED")
     
@@ -234,6 +227,22 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
     for epoch in range(EPOCHS):
         # --- UPDATE AUGMENTATION STRENGTH (Curriculum Learning) ---
         if curriculum_scheduler is not None:
+            # Update scheduler state
+            curriculum_scheduler.step(epoch)
+            
+            # Log milestone when strength changes
+            if curriculum_scheduler.just_changed():
+                strength = curriculum_scheduler.get_current_strength()
+                aug_params = curriculum_scheduler.get_augmentation_params(epoch)
+                print(f"\n{'='*60}")
+                print(f"[CURRICULUM] Epoch {epoch+1}: Switching to {strength.upper()} augmentation")
+                print(f"             flip_prob={aug_params['flip_prob']:.2f}, "
+                      f"rotation={aug_params['rotation_range']}°, "
+                      f"scale=±{aug_params['scale_range']:.2f}, "
+                      f"noise_std={aug_params['noise_std']:.4f}")
+                print(f"{'='*60}\n")
+            
+            # Apply augmentation params
             aug_params = curriculum_scheduler.get_augmentation_params(epoch)
             train_dataset.update_augmentation_params(aug_params)
             current_strength = (aug_params['flip_prob'] + aug_params['rotation_range']/20 + aug_params['scale_range']/0.2 + aug_params['noise_std']/0.01) / 4
@@ -316,23 +325,7 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
         val_recall = recall_score(all_labels_val, all_preds_val, average='weighted', zero_division=0)
         val_f1 = f1_score(all_labels_val, all_preds_val, average='weighted', zero_division=0)
         
-        val_robust_f1 = None
         val_handedness_f1 = None
-        
-        # --- ROBUST VALIDATION (Back View) ---
-        # Test performance on forced back view data to ensure model robustness to viewpoint changes
-        if ROBUST_VALIDATION and val_robust_loader is not None:
-            all_preds_robust = []
-            all_labels_robust = []
-            with torch.no_grad():
-                for inputs, labels in val_robust_loader:
-                    inputs, labels = inputs.to(device), labels.to(device)
-                    outputs = model(inputs)
-                    _, predicted = outputs.max(1)
-                    all_preds_robust.extend(predicted.cpu().numpy())
-                    all_labels_robust.extend(labels.cpu().numpy())
-            
-            val_robust_f1 = f1_score(all_labels_robust, all_preds_robust, average='weighted', zero_division=0)
         
         # --- HANDEDNESS ROBUSTNESS (Left-Handed Simulation) ---
         # Test performance on FLIPPED validation data to ensure the model generalizes to left-handed players
@@ -349,22 +342,17 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
             
             val_handedness_f1 = f1_score(all_labels_handedness, all_preds_handedness, average='weighted', zero_division=0)
         
-        # Combined robust score (average of back view and handedness)
+        # Combined robust score (handedness only, back view removed)
         final_robust_score = val_f1
-        if val_robust_f1 is not None and val_handedness_f1 is not None:
-            final_robust_score = (val_f1 + val_robust_f1 + val_handedness_f1) / 3.0
-        elif val_robust_f1 is not None:
-            final_robust_score = (val_f1 + val_robust_f1) / 2.0
-        elif val_handedness_f1 is not None:
+        if val_handedness_f1 is not None:
             final_robust_score = (val_f1 + val_handedness_f1) / 2.0
 
         # Update learning rate
         scheduler.step()
         
         # Log and save
-        robust_str = f"{val_robust_f1:.4f}" if val_robust_f1 is not None else "N/A"
         handedness_str = f"{val_handedness_f1:.4f}" if val_handedness_f1 is not None else "N/A"
-        print(f"End Epoch {epoch+1}: Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f} | Val F1: {val_f1:.4f} | Robust(Back): {robust_str} | Handedness(Flip): {handedness_str} | LR: {scheduler.get_last_lr()[0]:.6f}")
+        print(f"End Epoch {epoch+1}: Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f} | Val F1: {val_f1:.4f} | Handedness(Flip): {handedness_str} | LR: {scheduler.get_last_lr()[0]:.6f}")
         
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
@@ -386,9 +374,8 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
             best_f1 = combined_score
             patience_counter = 0  # Reset early stopping counter
             torch.save(model.state_dict(), MODEL_SAVE_PATH)
-            robust_log = f", Back:{val_robust_f1:.4f}" if val_robust_f1 is not None else ""
             handedness_log = f", Flip:{val_handedness_f1:.4f}" if val_handedness_f1 is not None else ""
-            print(f"--> New best model saved! (Comb: {combined_score:.4f} [Val:{val_f1:.4f}{robust_log}{handedness_log}])")
+            print(f"--> New best model saved! (Comb: {combined_score:.4f} [Val:{val_f1:.4f}{handedness_log}])")
         else:
             patience_counter += 1
         

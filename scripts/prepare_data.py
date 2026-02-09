@@ -18,7 +18,7 @@ def load_config(config_path):
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
-def main(config_path, reuse_2d=False):
+def main(config_path):
 
     config = load_config(config_path)
     DATA_RAW_DIR = config['data']['raw_dir']
@@ -26,8 +26,6 @@ def main(config_path, reuse_2d=False):
 
     # Models
     MODEL_POSE_EXTRACTOR_PATH = config['model'].get('pose_extractor_path')
-    USE_MOTIONBERT = config['model'].get('use_motionbert', False)
-    MODEL_MOTIONBERT_PATH = config['model'].get('motionbert_path', '')
 
     # Hyperparameters
     SEQ_LEN = config['hyperparameters']['seq_len']
@@ -40,107 +38,18 @@ def main(config_path, reuse_2d=False):
     # 1. Setup Directory
     os.makedirs(DATA_PROCESSED_DIR, exist_ok=True)
     
-    # 2. Reuse existing 2D data if specified and add depth via MotionBERT
-    if reuse_2d:
-        X_path = os.path.join(DATA_PROCESSED_DIR, 'X.npy')
-        if os.path.exists(X_path):
-            print(f"\n[INFO] Reusing existing 2D data from {X_path}")
-            X_old = np.load(X_path)
-            
-            # Normalization of shapes: target (N, T, V, C)
-            
-            # Case 1: 5D (N, T, M, V, C) - remove M if 1
-            if X_old.ndim == 5 and X_old.shape[2] == 1:
-                print(f"Detected 5D format (N, T, M, V, C): {X_old.shape}. Squeezing M...")
-                X_old = X_old.squeeze(2)
-            
-            # Case 2: (N, C, T, V) - Transpose to (N, T, V, C)
-            if X_old.ndim == 4 and X_old.shape[1] < 10: 
-                 print(f"Detected (N, C, T, V) format: {X_old.shape}. Transposing...")
-                 X_old = X_old.transpose(0, 2, 3, 1)
-            
-            print(f"Loaded data shape: {X_old.shape}")
-            
-            if USE_MOTIONBERT:
-                from src.motionbert_extractor import MotionBERTExtractor
-                try:
-                    lifter = MotionBERTExtractor(checkpoint_path=MODEL_MOTIONBERT_PATH)
-                except Exception as e:
-                    print(f"Lifter Init Error: {e}")
-                    lifter = MotionBERTExtractor(checkpoint_path=MODEL_MOTIONBERT_PATH)
 
-                if lifter.valid:
-                    print("Lifting 2D Keypoints to 3D...")
-                    X_new = []
-                    for i in tqdm(range(len(X_old)), desc="Lifting Sequences"):
-                        sample_2d = X_old[i]
-                        kpts_3d = lifter.lift_2d_to_3d_coco(sample_2d)
-                        
-                        if sample_2d.shape[-1] >= 3:
-                            conf = sample_2d[:, :, 2:3]
-                            sample_final = np.concatenate([kpts_3d, conf], axis=2)
-                        else:
-                            sample_final = kpts_3d
-                        X_new.append(sample_final)
-                    
-                    X = np.array(X_new, dtype=np.float32)
-                    # The new shape should be (N, T, V, C) where C is now 3 (x,y,z) or 4 (x,y,z,conf)
-                    print(f"New 3D Data Shape: {X.shape}")
-                    
-                    if os.path.exists(X_path) and os.access(os.path.dirname(X_path), os.W_OK):
-                         os.rename(X_path, X_path.replace('.npy', '_2d_backup.npy'))
-                    elif not os.access(os.path.dirname(X_path), os.W_OK):
-                         print(f"[WARNING] Input directory is read-only. Saving to local working directory instead.")
-                         local_output_dir = os.path.join(os.getcwd(), 'data', 'processed')
-                         os.makedirs(local_output_dir, exist_ok=True)
-                         X_path = os.path.join(local_output_dir, 'X.npy')
 
-                    print(f"Saving 3D data to {X_path}...")
-                    np.save(X_path, X)
-                    
-                    # Ensure y.npy and label_map.npy are also in the destination folder
-                    y_src = os.path.join(DATA_PROCESSED_DIR, 'y.npy')
-                    label_map_src = os.path.join(DATA_PROCESSED_DIR, 'label_map.npy')
-                    
-                    y_dst = os.path.join(os.path.dirname(X_path), 'y.npy')
-                    label_map_dst = os.path.join(os.path.dirname(X_path), 'label_map.npy')
-                    
-                    if os.path.exists(y_src) and y_src != y_dst:
-                        print(f"Copying y.npy to {y_dst}...")
-                        import shutil
-                        shutil.copy2(y_src, y_dst)
-                        
-                    if os.path.exists(label_map_src) and label_map_src != label_map_dst:
-                        print(f"Copying label_map.npy to {label_map_dst}...")
-                        import shutil
-                        shutil.copy2(label_map_src, label_map_dst)
-                        
-                    print("Done. Ready for training.")
-                    return
-
-    # 2. Extractor Initialization
+    # 2. Extractor Initialization (2D only)
     print(f"Initialization Pose Extractor...")
     
-    try:
-        if USE_MOTIONBERT:
-            print(" Using MotionBERT for 3D Lifting...")
-            from src.motionbert_extractor import MotionBERTIntegratedExtractor
-            extractor = MotionBERTIntegratedExtractor(
-                yolo_path=MODEL_POSE_EXTRACTOR_PATH,
-                motionbert_ckpt=MODEL_MOTIONBERT_PATH,
-                smart_crop=SMART_CROP
-            )
-        else:
-            extractor = PoseExtractor(
-                model_path=MODEL_POSE_EXTRACTOR_PATH,
-                seq_len=SEQ_LEN,
-                num_joints=NUM_JOINTS,
-                confidence_thresh=CONFIDENCE_THRESH,
-                smart_crop=SMART_CROP
-            )
-    except Exception as e:
-        print(f"Error during model loading: {e}")
-        return
+    extractor = PoseExtractor(
+        model_path=MODEL_POSE_EXTRACTOR_PATH,
+        seq_len=SEQ_LEN,
+        num_joints=NUM_JOINTS,
+        confidence_thresh=CONFIDENCE_THRESH,
+        smart_crop=SMART_CROP
+    )
 
     # 3. Scan Dataset
     try:
@@ -211,8 +120,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Prepare dataset by extracting pose keypoints')
     parser.add_argument('--config', type=str, default='config.yaml', 
                         help='Path to config YAML file (default: config.yaml)')
-    parser.add_argument('--reuse_2d', action='store_true', 
-                        help='Skip video extraction and reuse existing 2D X.npy for 3D lifting')
     args = parser.parse_args()
     
-    main(args.config, reuse_2d=args.reuse_2d)
+    main(args.config)

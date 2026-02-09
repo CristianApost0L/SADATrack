@@ -20,9 +20,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.dataset import get_thetis_files, THETIS_CLASSES
 from src.extractor import PoseExtractor
-from src.motionbert_extractor import MotionBERTExtractor
 from ultralytics import YOLO
-from mpl_toolkits.mplot3d import Axes3D
 
 def load_config(config_path):
     """Carica il file YAML di configurazione"""
@@ -49,13 +47,9 @@ COCO_CONNECTIONS = [
     (11, 13), (13, 15), (12, 14), (14, 16) # Legs
 ]
 
-H36M_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (0, 4), (4, 5), (5, 6), # Legs
-    (0, 7), (7, 8), (8, 9), (9, 10), # Spine/Head
-    (8, 11), (11, 12), (12, 13), (8, 14), (14, 15), (15, 16) # Arms
-]
 
-def visualize_validation(video_path, extractor, confidence_thresh=0.25, motionbert_extractor=None, output_dir='runs/validation'):
+
+def visualize_validation(video_path, extractor, confidence_thresh=0.25, output_dir='runs/validation'):
     """
     Performs frame-by-frame extraction and saves visualization video.
     Does not use _post_process (padding) to maintain synchronization with the original video.
@@ -64,7 +58,7 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, motionbe
         video_path: Path to the video file
         extractor: PoseExtractor instance
         confidence_thresh: Confidence threshold for YOLO detection
-        motionbert_extractor: MotionBERTExtractor instance (optional, for 3D visualization)
+
         output_dir: Directory to save output video
     """
     cap = cv2.VideoCapture(video_path)
@@ -119,35 +113,8 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, motionbe
     
     print(f"✓ Extracted {len(frames_rgb)} frames")
     
-    # --- MOTIONBERT 3D LIFTING (If enabled) ---
-    use_3d = False
-    if motionbert_extractor is not None and motionbert_extractor.valid:
-        print("Computing 3D poses with MotionBERT...")
-        try:
-            # Prepare 2D data for MotionBERT (T, 17, 3)
-            frames_2d_array = np.stack(frames_norm, axis=0)  # (T, 17, 3)
-            
-            # Lift to 3D (returns H36M format)
-            frames_3d_h36m = motionbert_extractor.lift_2d_to_3d_coco(frames_2d_array)
-            
-            # Convert to list for frame-by-frame access
-            frames_3d = [frames_3d_h36m[i] for i in range(len(frames_3d_h36m))]
-            use_3d = True
-            print(f"✓ 3D poses computed ({frames_3d_h36m.shape})")
-        except Exception as e:
-            print(f"⚠ Warning: MotionBERT 3D lifting failed: {e}")
-            frames_3d = [None] * len(frames_rgb)
-    else:
-        frames_3d = [None] * len(frames_rgb)
-
-    # --- ANIMATION SETUP ---
-    if use_3d:
-        fig = plt.figure(figsize=(18, 6))
-        ax1 = fig.add_subplot(1, 3, 1)
-        ax2 = fig.add_subplot(1, 3, 2)
-        ax3 = fig.add_subplot(1, 3, 3, projection='3d')
-    else:
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    # --- ANIMATION SETUP (2D only) ---
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
     
     fig.suptitle(f"Validation: {os.path.basename(video_path)} ({len(frames_rgb)} frames)", fontsize=14)
 
@@ -171,19 +138,7 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, motionbe
     # Testo info
     info_text = ax2.text(-0.9, 0.9, "", fontsize=9)
     
-    # 3D plot setup (if using MotionBERT)
-    if use_3d:
-        ax3.set_title("3D Reconstruction (MotionBERT)")
-        ax3.set_xlabel('X')
-        ax3.set_ylabel('Z (Depth)')
-        ax3.set_zlabel('Y')
-        ax3.set_xlim(-1, 1)
-        ax3.set_ylim(-1, 1)
-        ax3.set_zlim(-1, 1)
-        ax3.view_init(elev=15, azim=45)
-        
-        lines_3d = [ax3.plot([], [], [], 'g-', linewidth=2)[0] for _ in SKELETON_CONNECTIONS]
-        points_3d = ax3.scatter([], [], [], c='r', s=30)
+
 
     def update(frame_idx):
         # 1. Update Video
@@ -223,21 +178,6 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, motionbe
         # Check centering (Bacino)
         hip_x = (x_norm[11] + x_norm[12]) / 2
         info_text.set_text(f"Frame: {frame_idx}\nHip Center X: {hip_x:.3f}")
-        
-        # --- Update 3D Skeleton (if available) ---
-        if use_3d and frames_3d[frame_idx] is not None:
-            kpts_3d = frames_3d[frame_idx]  # (17, 3) - COCO format with X,Y,Z
-            x_3d, y_3d, z_3d = kpts_3d[:, 0], kpts_3d[:, 1], kpts_3d[:, 2]
-            
-            # Update lines in 3D
-            for line, (i, j) in zip(lines_3d, SKELETON_CONNECTIONS):
-                line.set_data([x_3d[i], x_3d[j]], [z_3d[i], z_3d[j]])
-                line.set_3d_properties([y_3d[i], y_3d[j]])
-            
-            # Update points in 3D
-            points_3d._offsets3d = (x_3d, z_3d, y_3d)
-            
-            return [im_display, points_raw, points_norm] + lines_raw + lines_norm + lines_3d + [points_3d]
         
         return [im_display, points_raw, points_norm] + lines_raw + lines_norm
 
@@ -333,9 +273,9 @@ def debug_prepared_data(data_path='data/processed/X.npy', output_dir='runs/debug
     print(f"  X range: [{x.min():.3f}, {x.max():.3f}]")
     print(f"  Y range: [{y_coord.min():.3f}, {y_coord.max():.3f}]")
     print(f"  Num keypoints: {len(x)}")
-    
-    # Visualization
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+     
+    # Visualization (2D only - COCO format)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
     fig.suptitle(f"Prepared Data Debug: {os.path.basename(data_path)}", fontsize=14)
     
     # Plot 1: COCO Connections
@@ -353,13 +293,13 @@ def debug_prepared_data(data_path='data/processed/X.npy', output_dir='runs/debug
     ax1.set_xlabel('X')
     ax1.set_ylabel('-Y (inverted)')
     
-    # Plot 2: H36M Connections
+    # Plot 2: Standard SKELETON_CONNECTIONS (used in training)
     ax2 = axes[1]
-    ax2.set_title("H36M Format (17 joints)")
-    ax2.scatter(x, -y_coord, c='red', s=50, zorder=3)
-    for i, j in H36M_CONNECTIONS:
+    ax2.set_title("Training Format (SKELETON_CONNECTIONS)")
+    ax2.scatter(x, -y_coord, c='green', s=50, zorder=3)
+    for i, j in SKELETON_CONNECTIONS:
         if i < len(x) and j < len(x):
-            ax2.plot([x[i], x[j]], [-y_coord[i], -y_coord[j]], 'r-', linewidth=2, alpha=0.6)
+            ax2.plot([x[i], x[j]], [-y_coord[i], -y_coord[j]], 'g-', linewidth=2, alpha=0.6)
     # Add joint numbers
     for i in range(len(x)):
         ax2.text(x[i], -y_coord[i], str(i), fontsize=8, ha='center', va='bottom')
@@ -367,21 +307,6 @@ def debug_prepared_data(data_path='data/processed/X.npy', output_dir='runs/debug
     ax2.grid(True, alpha=0.3)
     ax2.set_xlabel('X')
     ax2.set_ylabel('-Y (inverted)')
-    
-    # Plot 3: Standard SKELETON_CONNECTIONS (used in training)
-    ax3 = axes[2]
-    ax3.set_title("Training Format (SKELETON_CONNECTIONS)")
-    ax3.scatter(x, -y_coord, c='green', s=50, zorder=3)
-    for i, j in SKELETON_CONNECTIONS:
-        if i < len(x) and j < len(x):
-            ax3.plot([x[i], x[j]], [-y_coord[i], -y_coord[j]], 'g-', linewidth=2, alpha=0.6)
-    # Add joint numbers
-    for i in range(len(x)):
-        ax3.text(x[i], -y_coord[i], str(i), fontsize=8, ha='center', va='bottom')
-    ax3.set_aspect('equal')
-    ax3.grid(True, alpha=0.3)
-    ax3.set_xlabel('X')
-    ax3.set_ylabel('-Y (inverted)')
     
     # Save figure
     os.makedirs(output_dir, exist_ok=True)
@@ -393,20 +318,20 @@ def debug_prepared_data(data_path='data/processed/X.npy', output_dir='runs/debug
     # Show interpretation
     print("\n=== FORMAT INTERPRETATION ===")
     print("If the skeleton looks correct in:")
-    print("  - LEFT plot   → Data is in COCO format ✓")
-    print("  - MIDDLE plot → Data is in H36M format ✓")
-    print("  - RIGHT plot  → Training will use this topology")
+    print("  - LEFT plot  → Data is in COCO format ✓")
+    print("  - RIGHT plot → Training will use this topology")
+    print("\nNote: All data should be in COCO format (17 joints)")
     print("\nPress any key to close the plot...")
     plt.show()
 
-def main(config_path, mode='video', output_dir='runs/validation', num_videos=None, process_all=False, video_path=None):
+def main(config_path, mode='video', output_dir=None, num_videos=None, process_all=False, video_path=None):
     """
     Main debug function.
     
     Args:
         config_path: Path to config.yaml
         mode: 'video' for video extraction validation, 'data' for prepared data validation
-        output_dir: Directory to save validation videos
+        output_dir: Directory to save validation videos (overrides config if provided)
         num_videos: Number of random videos to process (default: None = interactive)
         process_all: Process all videos in dataset (default: False)
         video_path: Process a specific video file (default: None)
@@ -420,8 +345,6 @@ def main(config_path, mode='video', output_dir='runs/validation', num_videos=Non
         debug_prepared_data(X_PATH, OUTPUT_DIR)
         return
     
-    # mode == 'video': Original video validation
-    # Carica la configurazione
     config = load_config(config_path)
     DATA_RAW_DIR = config['data']['raw_dir']
     MODEL_YOLO_PATH = config['model']['pose_extractor_path']
@@ -429,9 +352,9 @@ def main(config_path, mode='video', output_dir='runs/validation', num_videos=Non
     NUM_JOINTS = config['hyperparameters']['num_joints']
     CONFIDENCE_THRESH = config['hyperparameters']['confidence_thresh']
     
-    # MotionBERT settings
-    USE_MOTIONBERT = config['model'].get('use_motionbert', False)
-    MOTIONBERT_PATH = config['model'].get('motionbert_path', None)
+    # Read validation output directory from config (can be overridden by parameter)
+    if output_dir is None:
+        output_dir = config['output'].get('validation_output_dir', 'runs/validation')
     
     # 1. Initialize extractor
     print("Loading model for validation...")
@@ -439,7 +362,7 @@ def main(config_path, mode='video', output_dir='runs/validation', num_videos=Non
     print(f"  - Sequence length: {SEQ_LEN}")
     print(f"  - Num joints: {NUM_JOINTS}")
     print(f"  - Confidence threshold: {CONFIDENCE_THRESH}")
-    print(f"  - Use MotionBERT 3D: {USE_MOTIONBERT}")
+    print(f"  - Visualization: 2D only (MotionBERT removed)")
     
     if not os.path.exists(MODEL_YOLO_PATH):
         print(f"\n⚠ Warning: Model path '{MODEL_YOLO_PATH}' not found!")
@@ -452,28 +375,6 @@ def main(config_path, mode='video', output_dir='runs/validation', num_videos=Non
         num_joints=NUM_JOINTS,
         confidence_thresh=CONFIDENCE_THRESH
     )
-    
-    # 1b. Initialize MotionBERT (if enabled)
-    motionbert_extractor = None
-    if USE_MOTIONBERT:
-        print(f"\nInitializing MotionBERT for 3D lifting...")
-        print(f"  - Checkpoint: {MOTIONBERT_PATH}")
-        try:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            motionbert_extractor = MotionBERTExtractor(
-                checkpoint_path=MOTIONBERT_PATH,
-                device=device
-            )
-            if motionbert_extractor.valid:
-                print("  ✓ MotionBERT loaded successfully")
-            else:
-                print("  ⚠ MotionBERT initialization failed, 3D visualization disabled")
-                motionbert_extractor = None
-        except Exception as e:
-            print(f"  ⚠ Error loading MotionBERT: {e}")
-            motionbert_extractor = None
-    else:
-        print("\n⚠ MotionBERT disabled in config (2D visualization only)")
 
     # 2. Get video list
     try:
@@ -497,7 +398,7 @@ def main(config_path, mode='video', output_dir='runs/validation', num_videos=Non
         
         print(f"\n--- PROCESSING SINGLE VIDEO ---")
         print(f"Video: {video_path}")
-        visualize_validation(video_path, extractor, CONFIDENCE_THRESH, motionbert_extractor, output_dir)
+        visualize_validation(video_path, extractor, CONFIDENCE_THRESH, output_dir)
         print("\n✓ Done!")
         return
     
@@ -507,7 +408,7 @@ def main(config_path, mode='video', output_dir='runs/validation', num_videos=Non
         for i, (target_video, label_id) in enumerate(samples, 1):
             class_name = THETIS_CLASSES[label_id] if 0 <= label_id < len(THETIS_CLASSES) else "Unknown"
             print(f"\n[{i}/{len(samples)}] {class_name}: {os.path.basename(target_video)}")
-            visualize_validation(target_video, extractor, CONFIDENCE_THRESH, motionbert_extractor, output_dir)
+            visualize_validation(target_video, extractor, CONFIDENCE_THRESH, output_dir)
         print("\n✓ All videos processed!")
         return
     
@@ -520,7 +421,7 @@ def main(config_path, mode='video', output_dir='runs/validation', num_videos=Non
         for i, (target_video, label_id) in enumerate(selected, 1):
             class_name = THETIS_CLASSES[label_id] if 0 <= label_id < len(THETIS_CLASSES) else "Unknown"
             print(f"\n[{i}/{num_to_process}] {class_name}: {os.path.basename(target_video)}")
-            visualize_validation(target_video, extractor, CONFIDENCE_THRESH, motionbert_extractor, output_dir)
+            visualize_validation(target_video, extractor, CONFIDENCE_THRESH, output_dir)
         print("\n✓ All videos processed!")
         return
 
@@ -536,7 +437,7 @@ def main(config_path, mode='video', output_dir='runs/validation', num_videos=Non
         print(f"Video: {target_video}")
         print(f"Class: {class_name} (ID: {label_id})")
         
-        visualize_validation(target_video, extractor, CONFIDENCE_THRESH, motionbert_extractor, output_dir)
+        visualize_validation(target_video, extractor, CONFIDENCE_THRESH, output_dir)
         
         # Ask to continue
         ans = input("\nProcess another video? (y/N): ")

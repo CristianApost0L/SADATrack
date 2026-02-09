@@ -162,14 +162,8 @@ def analyze_confidence(X, y, label_map, output_dir='runs/analysis'):
         print(f"Confidence analysis requires at least 3 channels (X, Y, Confidence)")
         return
     
-    # Extract confidence channel (assuming it's the 3rd channel, index 2)
-    if C == 3:
-        confidences = X_analysis[:, :, :, 2]  # (N, T, V)
-    elif C == 4:
-        confidences = X_analysis[:, :, :, 3]  # (N, T, V) - 4th channel if X,Y,Z,Conf
-        print(f"Using 4th channel as confidence (X, Y, Z, Conf format)")
-    else:
-        confidences = X_analysis[:, :, :, 2]  # Default to 3rd channel
+    # Extract confidence channel (3rd channel: X, Y, Conf format)
+    confidences = X_analysis[:, :, :, 2]  # (N, T, V)
     
     print(f"\nConfidence statistics:")
     print(f"  Shape: {confidences.shape}")

@@ -2,10 +2,9 @@
 Comprehensive augmentation pipeline for skeleton sequences.
 """
 import numpy as np
-from .geometric import flip_horizontal, global_rotation, global_scaling, shearing, pose_rotation, local_zoom
+from .geometric import flip_horizontal, global_rotation, global_scaling, shearing, local_zoom
 from .temporal import temporal_crop, temporal_scaling, frame_dropping
 from .noise import local_joint_jittering, bone_length_scaling, confidence_masking, confidence_jittering, keypoint_dropout
-from .view import augment_3d_view_rotation, simulate_back_view
 
 
 def augment_skeleton(data, 
@@ -21,11 +20,8 @@ def augment_skeleton(data,
                      apply_bone_scaling=True,
                      apply_confidence_mask=True,
                      apply_keypoint_dropout=True,
-                     apply_pose_rotation=True,
                      apply_local_zoom=True,
                      apply_confidence_jitter=True,
-                     apply_back_view=True,
-                     force_back_view=False,
                      force_flip=False):
     """
     Comprehensive skeleton augmentation pipeline.
@@ -37,7 +33,6 @@ def augment_skeleton(data,
         scale_range: global scale range
         noise_std: Gaussian noise std
         apply_*: whether to apply each augmentation
-        force_back_view: force back view simulation (for validation)
         force_flip: force horizontal flip (for handedness validation)
     
     Returns:
@@ -47,14 +42,6 @@ def augment_skeleton(data,
     
     if C < 2:
         return data
-
-    # 0. Back View Simulation (Solving the Frontal Bias)
-    if C >= 2 and (force_back_view or (apply_back_view and np.random.random() < 0.5)):
-        data = simulate_back_view(data)
-
-    # 3D View Augmentation (Simulate Camera Angle) - Requires Z coordinate
-    if C >= 3 and apply_pose_rotation and np.random.random() < 0.5:
-        data = augment_3d_view_rotation(data, angle_range=rotation_range)
 
     # Temporal augmentations
     if apply_temporal_crop and np.random.random() < 0.3:
@@ -69,9 +56,6 @@ def augment_skeleton(data,
     # Spatial augmentations
     if apply_shearing and np.random.random() < 0.3:
         data = shearing(data)
-    
-    if apply_pose_rotation and np.random.random() < 0.3:
-        data = pose_rotation(data)
     
     if apply_local_zoom and np.random.random() < 0.3:
         data = local_zoom(data)

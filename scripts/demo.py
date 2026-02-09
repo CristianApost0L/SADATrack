@@ -13,11 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.model import HDGCN_Tennis, CTRGCN_Tennis
 from src.extractor import PoseExtractor
 from src.dataset import COCO_BONE_PAIRS, normalize_skeleton
-try:
-    from src.motionbert_extractor import MotionBERTExtractor
-except ImportError:
-    MotionBERTExtractor = None
-    print("Warning: Could not import MotionBERTExtractor. 3D lifting will not be available.")
+from src.constants import COCO_SWAP_PAIRS
 
 def load_config(config_path):
     """Load YAML configuration file"""
@@ -35,15 +31,6 @@ SKELETON_CONNECTIONS = [
     (5, 0), (6, 0), (1, 0), (2, 0), (3, 1), (4, 2)    # Head
 ]
 
-# H36M skeleton connections for 3D visualization (MotionBERT format)
-H36M_SKELETON_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3),      # Right Leg
-    (0, 4), (4, 5), (5, 6),      # Left Leg
-    (0, 7), (7, 8),              # Spine/Torso
-    (8, 9), (9, 10),             # Neck/Head
-    (8, 11), (11, 12), (12, 13), # Left Arm
-    (8, 14), (14, 15), (15, 16)  # Right Arm
-]
 
 def load_label_map(data_processed_dir):
     path = os.path.join(data_processed_dir, 'label_map.npy')
@@ -73,44 +60,24 @@ def draw_skeleton(frame, kpts, confs, modality='joint', color=(0, 255, 0)):
                 c = (0, 0, 255) if draw_bones else (0, 255, 0)
                 cv2.circle(frame, (int(kpts[i, 0]), int(kpts[i, 1])), 4, c, -1)
 
-def draw_3d_skeleton_on_canvas(canvas, kpts_3d, offset_x=150, offset_y=150, scale=120, color=(0, 255, 255)):
-    """
-    Draws 3D skeleton on a separate canvas.
-    Displays two views: Front (X, Y) and Side (Z, Y).
-    """
-    if kpts_3d is None: return
-    
-    root = kpts_3d[0] # H36M Pelvis
-    kpts_centered = kpts_3d - root
-    
-    view_1_offset = (offset_x // 2, offset_y)
-    view_2_offset = (offset_x + (offset_x // 2), offset_y)
-    
-    for i, j in H36M_SKELETON_CONNECTIONS:
-        if i >= len(kpts_centered) or j >= len(kpts_centered): continue
-        
-        p1 = kpts_centered[i]
-        p2 = kpts_centered[j]
-        
-        # --- VIEW 1: Front (X, Y) ---
-        u1 = int(p1[0] * scale + view_1_offset[0])
-        v1 = int(p1[1] * scale + view_1_offset[1])
-        u2 = int(p2[0] * scale + view_1_offset[0])
-        v2 = int(p2[1] * scale + view_1_offset[1])
-        cv2.line(canvas, (u1, v1), (u2, v2), color, 2)
-        cv2.circle(canvas, (u1, v1), 3, (255, 255, 0), -1) 
-        
-        # --- VIEW 2: Side (Z, Y) ---
-        # Z as horizontal
-        u1_s = int(p1[2] * scale + view_2_offset[0]) 
-        v1_s = int(p1[1] * scale + view_2_offset[1])
-        u2_s = int(p2[2] * scale + view_2_offset[0]) 
-        v2_s = int(p2[1] * scale + view_2_offset[1])
-        cv2.line(canvas, (u1_s, v1_s), (u2_s, v2_s), (0, 0, 255), 2)
-        cv2.circle(canvas, (u1_s, v1_s), 3, (255, 0, 255), -1)
 
-    cv2.putText(canvas, "Front (X-Y)", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    cv2.putText(canvas, "Side (Z-Y)", (offset_x + 10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+def flip_keypoints_horizontal(kpts):
+    """
+    Flip keypoints horizontally to convert back-view to front-view convention.
+    This swaps left/right indices to match anatomical labels.
+    
+    Args:
+        kpts: (17, 3) array with [x, y, conf]
+    Returns:
+        Flipped keypoints with left/right swapped
+    """
+    kpts_flipped = kpts.copy()
+    # Swap left/right pairs (anatomical correction)
+    for left, right in COCO_SWAP_PAIRS:
+        kpts_flipped[left] = kpts[right]
+        kpts_flipped[right] = kpts[left]
+    return kpts_flipped
 
 def convert_to_bone(tensor_data):
     """Convert joint data to bone vectors."""
@@ -161,6 +128,7 @@ def main(args):
     
     # Confidence threshold for swing detection
     CONFIDENCE_THRESHOLD = args.confidence
+    BACK_VIEW = args.back_view  # Flag for players facing away from camera
     
     DATA_PROCESSED_DIR = data_config['processed_dir']
     
@@ -172,8 +140,6 @@ def main(args):
     POSE_MODEL_PATH = config['model']['pose_extractor_path']
     SMART_CROP = config['model'].get('smart_crop', False)
     SEQ_LEN = config['hyperparameters'].get('seq_len', 40)
-    USE_MOTIONBERT = config['model'].get('use_motionbert', False)
-    MOTIONBERT_PATH = config['model'].get('motionbert_path', '')
     IN_CHANNELS = model_config['in_channels']
     
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -204,14 +170,6 @@ def main(args):
         smart_crop=SMART_CROP
     )
 
-    lifter = None
-    if USE_MOTIONBERT:
-        if MotionBERTExtractor is None:
-             print("ERROR: MotionBERT is required by config but could not be imported.")
-             return
-        print(f"Loading MotionBERT Lifter from {MOTIONBERT_PATH}...")
-        lifter = MotionBERTExtractor(checkpoint_path=MOTIONBERT_PATH, device=DEVICE)
-
     cap = cv2.VideoCapture(args.source)
     if not cap.isOpened():
         print(f"ERROR: Cannot open video file: {args.source}")
@@ -230,14 +188,14 @@ def main(args):
         os.makedirs(output_dir, exist_ok=True)
     
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    vis_3d_width = 400 if lifter else 0
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width + vis_3d_width, height))
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width , height))
     
-    # 3. State Management
+    # State Management (2D only)
     # Target effective FPS ~30
     target_fps = 30
     stride = max(1, int(round(fps / target_fps)))
-    print(f"Video FPS: {fps}, Target FPS: {target_fps}, Stride: {stride}")
+    mode_str = "2D Mode" + (" | Back View Correction Enabled" if BACK_VIEW else "")
+    print(f"Video FPS: {fps}, Target FPS: {target_fps}, Stride: {stride}  [{mode_str}]")
 
     # Single player tracking
     pose_buffer = deque(maxlen=SEQ_LEN)
@@ -246,7 +204,6 @@ def main(args):
     # --- PERSISTENT STATE ---
     # Holds the state to draw on SKIPPED frames
     last_detected_pose = None  # (norm, raw, confs, box)
-    last_3d_skeleton = None    # For 3D view
     last_label = "Waiting..."
     last_conf = 0.0
     
@@ -256,11 +213,6 @@ def main(args):
         ret, frame = cap.read()
         if not ret: break
         
-        # Prepare 3D Canvas (Always redraw, but using cached data on skipped frames)
-        if lifter:
-            canvas_3d = np.zeros((height, vis_3d_width, 3), dtype=np.uint8)
-            cv2.line(canvas_3d, (vis_3d_width//2, 0), (vis_3d_width//2, height), (50, 50, 50), 1)
-
         # === UPDATE LOGIC (Only on Stride) ===
         if frame_idx % stride == 0:
             
@@ -321,6 +273,11 @@ def main(args):
                 
                 # Normalize keypoints
                 norm_kpts = extractor._normalize(kpts_raw, p_box_h, p_center)
+                
+                # Apply back-view correction if enabled
+                if BACK_VIEW:
+                    norm_kpts = flip_keypoints_horizontal(norm_kpts)
+                
                 current_frame_pose = (norm_kpts, kpts_raw, kpts_raw[:, 2], xyxy)
             
             # Store in History Buffer
@@ -339,16 +296,6 @@ def main(args):
                 non_zero_frames = np.sum(np.sum(input_seq, axis=(1, 2)) > 0)
                 
                 if non_zero_frames > SEQ_LEN // 2:
-                    # Lift to 3D if enabled
-                    if lifter:
-                        kpts_3d_seq = lifter.lift_2d_to_3d(input_seq)
-                        last_3d_skeleton = kpts_3d_seq[-1]
-                        
-                        # H36M -> COCO
-                        kpts_3d_coco = lifter._h36m_to_coco(kpts_3d_seq, original_coco=input_seq)
-                        
-                        conf = input_seq[:, :, 2:3] if input_seq.shape[-1] >= 3 else np.ones((SEQ_LEN, 17, 1))
-                        input_seq = np.concatenate([kpts_3d_coco, conf], axis=2)
                     
                     # Normalize
                     input_seq_transposed = input_seq.transpose(2, 0, 1)  # (C, T, V)
@@ -396,20 +343,9 @@ def main(args):
             label_text = f"{last_label} ({last_conf:.2f})"
             cv2.putText(frame, label_text, (int(box[0]), int(box[1])-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-        if lifter and last_3d_skeleton is not None:
-            draw_3d_skeleton_on_canvas(canvas_3d, last_3d_skeleton, 
-                                      offset_x=vis_3d_width//2, 
-                                      offset_y=height//2, 
-                                      scale=120, 
-                                      color=(0, 255, 255))
-
         cv2.putText(frame, f"Frame: {frame_idx} | Buff: {len(pose_buffer)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
-        final_frame = frame
-        if lifter:
-             final_frame = np.hstack((frame, canvas_3d))
-             
-        out.write(final_frame)
+        out.write(frame)
         frame_idx += 1
         
     cap.release()
@@ -425,6 +361,7 @@ if __name__ == "__main__":
     parser.add_argument('--pose_model', default=None)
     parser.add_argument('--output', default='demo_results/')
     parser.add_argument('--confidence', type=float, default=0.5, help='Confidence threshold for swing detection (0.0-1.0, default: 0.5)')
+    parser.add_argument('--back_view', action='store_true', help='Enable if player is facing away from camera (flips left/right for anatomical correctness)')
     
     args = parser.parse_args()
     main(args)

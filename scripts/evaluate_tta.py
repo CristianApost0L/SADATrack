@@ -16,7 +16,8 @@ from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.dataset import TennisDataset
-from src.model import HDGCN_Tennis
+from src.model import HDGCN_Tennis, CTRGCN_Tennis
+
 
 def load_config(config_path):
     """Load YAML configuration file"""
@@ -186,9 +187,6 @@ def main(config_path):
         model_type = detected_type
     
     print(f"Initializing model type: {model_type}")
-
-    # Load model architecture
-    from src.model import HDGCN_Tennis, CTRGCN_Tennis  # Ensure both are imported
 
     if model_type == 'HDGCN':
         model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT)

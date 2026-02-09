@@ -9,8 +9,6 @@ data:
 model:
   pose_extractor_path: 'models/yolov8x-pose.pt'  # YOLO-Pose model for person detection and keypoint extraction
   smart_crop: true                  # Enable Smart Crop (zoom on detected person)
-  use_motionbert: true              # Enable MotionBERT 3D lifting
-  motionbert_path: 'models/MB_ft_h36m.pth' # Path to MotionBERT checkpoint (Download: https://1drv.ms/f/s!AvAdh0LSjEOlgSoTqtyR5Zsgi8_Z?e=rn4VJf)
 
 # Hyperparameters
 hyperparameters:
@@ -33,7 +31,6 @@ training:
   modality: 'joint'             # 'joint' or 'bone'
 
   augment: true                # Enable/disable data augmentation
-  robust_validation: true       # Enable/disable robust validation with forced back view
   default_augmentation_strength: 'medium'  # Default strength if curriculum learning is disabled ('weak', 'medium', 'strong')
   
   # Curriculum Learning
@@ -46,8 +43,8 @@ training:
 # Model hyperparameters
 model_hyperparameters:
   type: 'HDGCN'             # 'HDGCN' or 'CTRGCN'
-  dropout: 0.5
-  in_channels: 4            # Input channels (4 for X,Y,Z,Conf)
+  dropout: 0.2
+  in_channels: 3            # Input channels (3 for X,Y,Conf)
 
   
 # Output paths
@@ -55,6 +52,7 @@ output:
   model_save_path: 'models/best_model_hdgcn.pth'
   plots_output_dir: 'runs'
   analysis_output_dir: 'runs/analysis'
+  validation_output_dir: 'runs/validation'
   folds_output_dir: 'runs/kfold_results'
   evaluation_dir: 'runs/evaluation_tta'
   checkpoints_dir: 'models/checkpoints'
