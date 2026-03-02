@@ -6,6 +6,7 @@ import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import geoopt
 from torch.utils.data import DataLoader
 import numpy as np
 from tqdm import tqdm
@@ -97,6 +98,8 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
     EPOCHS = training_config['epochs']
     LEARNING_RATE = training_config['learning_rate']
     WEIGHT_DECAY = training_config['weight_decay']
+    HYP_LR = training_config.get('hyperbolic_lr', LEARNING_RATE)
+    HYP_WD = training_config.get('hyperbolic_weight_decay', WEIGHT_DECAY)
     DROPOUT = model_config['dropout']
     IN_CHANNELS = model_config['in_channels']
     RANDOM_SEED = training_config['random_seed']
@@ -109,6 +112,7 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
 
     # Model type (HDGCN, CTRGCN, etc.)
     MODEL_TYPE = model_config.get('type', 'HDGCN')
+    USE_HYPERBOLIC = model_config.get('use_hyperbolic', False)
     
     # Curriculum learning settings
     USE_CURRICULUM = training_config.get('use_curriculum_learning', False)
@@ -207,9 +211,9 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
     random.seed(RANDOM_SEED)
     
     if model_type == 'HDGCN':
-        model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT)
+        model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT, use_hyperbolic=USE_HYPERBOLIC)
     elif model_type == 'CTRGCN':
-        model = CTRGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT)
+        model = CTRGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT, use_hyperbolic=USE_HYPERBOLIC)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
@@ -217,7 +221,24 @@ def run_training_fold(X_train, y_train, X_val, y_val, config, fold_idx=None, num
     
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss(weight=class_weights)
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    
+    # Separate parameters for hyperbolic vs euclidean optimization
+    if USE_HYPERBOLIC:
+        hyperbolic_params = []
+        euclidean_params = []
+        for name, param in model.named_parameters():
+            if isinstance(param, geoopt.tensor.ManifoldParameter) or 'manifold' in name or isinstance(param, geoopt.tensor.ManifoldTensor):
+                hyperbolic_params.append(param)
+            else:
+                euclidean_params.append(param)
+                
+        optimizer = geoopt.optim.RiemannianAdam([
+            {'params': euclidean_params},
+            {'params': hyperbolic_params, 'lr': HYP_LR, 'weight_decay': HYP_WD} # Can use different LR if needed
+        ], lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+        print(f"[INFO] Using RiemannianAdam Optimizer for Hyperbolic layers (LR: {HYP_LR}, WD: {HYP_WD}).")
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     
     # Scheduler: Cosine Annealing
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-5)

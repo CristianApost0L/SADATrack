@@ -59,7 +59,10 @@ def apply_tta(model, inputs, device, tta_augmentations):
     
     # Original pass
     with torch.no_grad():
-        output = model(inputs)
+        if hasattr(model, 'use_hyperbolic') and model.use_hyperbolic:
+            output, _ = model(inputs, return_embeddings=True)
+        else:
+            output = model(inputs)
         prob = F.softmax(output, dim=1)
         all_probs.append(prob)
     
@@ -80,7 +83,10 @@ def apply_tta(model, inputs, device, tta_augmentations):
             inputs_aug[:, :2, :, :] += noise_tensor
         
         with torch.no_grad():
-            output = model(inputs_aug)
+            if hasattr(model, 'use_hyperbolic') and model.use_hyperbolic:
+                output, _ = model(inputs_aug, return_embeddings=True)
+            else:
+                output = model(inputs_aug)
             prob = F.softmax(output, dim=1)
             all_probs.append(prob)
     
@@ -113,6 +119,7 @@ def main(config_path):
     TTA_ENABLED = evaluation_config['tta_enabled']
     TTA_AUGMENTATIONS = evaluation_config['tta_augmentations']
     IN_CHANNELS = model_config['in_channels']
+    USE_HYPERBOLIC = model_config.get('use_hyperbolic', False)
     RANDOM_SEED = config['training']['random_seed']
     VAL_SPLIT = training_config.get('val_split', 0.2)
     NUM_WORKERS = training_config.get('num_workers', 2)
@@ -189,9 +196,9 @@ def main(config_path):
     print(f"Initializing model type: {model_type}")
 
     if model_type == 'HDGCN':
-        model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT)
+        model = HDGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT, use_hyperbolic=USE_HYPERBOLIC)
     elif model_type == 'CTRGCN':
-        model = CTRGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT)
+        model = CTRGCN_Tennis(num_classes=num_classes, in_channels=IN_CHANNELS, drop_out=DROPOUT, use_hyperbolic=USE_HYPERBOLIC)
     else:
         raise ValueError(f"Unknown model type in config: {model_type}")
     
@@ -219,6 +226,7 @@ def main(config_path):
     # 5. Inference with TTA
     all_preds = []
     all_labels = []
+    all_hyp_dists = [] # To store hyperbolic radius
     
     if TTA_ENABLED:
         print(f"Running TTA with {len(TTA_AUGMENTATIONS) + 1} passes (original + {len(TTA_AUGMENTATIONS)} augmentations)...")
@@ -231,13 +239,25 @@ def main(config_path):
             
             if TTA_ENABLED:
                 avg_prob = apply_tta(model, inputs, DEVICE, TTA_AUGMENTATIONS)
+                # TTA hides the embedding so we do a standard pass just for stats if needed
+                if USE_HYPERBOLIC:
+                    _, z = model(inputs, return_embeddings=True)
             else:
-                output = model(inputs)
+                if USE_HYPERBOLIC:
+                    output, z = model(inputs, return_embeddings=True)
+                else:
+                    output = model(inputs)
                 avg_prob = F.softmax(output, dim=1)
             
             _, predicted = torch.max(avg_prob, 1)
             all_preds.extend(predicted.cpu().numpy())
             all_labels.extend(labels.numpy())
+            
+            # Record hyperbolic distance if available
+            if USE_HYPERBOLIC:
+                z_norm = torch.norm(z, p=2, dim=1).clamp(max=0.99)
+                hyp_dists = torch.arctanh(z_norm).cpu().numpy()
+                all_hyp_dists.extend(hyp_dists)
     
     # 6. Compute metrics
     accuracy = accuracy_score(all_labels, all_preds)
@@ -250,7 +270,41 @@ def main(config_path):
     print(f"\nOverall Accuracy: {accuracy:.4f}\n")
     print(report)
     print("="*60)
+    print(f"\nOverall Accuracy: {accuracy:.4f}\n")
+    print(report)
+    print("="*60)
     
+    hyp_report_str = ""
+    if USE_HYPERBOLIC and len(all_hyp_dists) > 0:
+        print("\n" + "="*60)
+        print(" HYPERBOLIC SPACE STATISTICS (Avg Radius per Class)")
+        print("="*60)
+        hyp_report_str += "\nHYPERBOLIC SPACE STATISTICS (Avg Radius per Class)\n"
+        hyp_report_str += "-"*60 + "\n"
+        
+        # Calculate stats per class
+        all_hyp_dists = np.array(all_hyp_dists)
+        all_preds_np = np.array(all_preds)
+        
+        for class_idx in range(num_classes):
+            mask = (all_preds_np == class_idx)
+            if np.any(mask):
+                class_dists = all_hyp_dists[mask]
+                avg_dist = np.mean(class_dists)
+                max_dist = np.max(class_dists)
+                min_dist = np.min(class_dists)
+                class_name = class_names[class_idx]
+                
+                stat_line = f"{class_name:<20} | Avg: {avg_dist:.4f} | Min: {min_dist:.4f} | Max: {max_dist:.4f}"
+                print(stat_line)
+                hyp_report_str += stat_line + "\n"
+        
+        overall_avg = np.mean(all_hyp_dists)
+        overall_line = f"\nOVERALL AVG RADIUS: {overall_avg:.4f}"
+        print(overall_line)
+        hyp_report_str += overall_line + "\n"
+        print("="*60)
+        
     # Save report
     report_path = os.path.join(EVALUATION_DIR, f"report_{'tta' if TTA_ENABLED else 'standard'}.txt")
     with open(report_path, 'w') as f:
@@ -258,6 +312,8 @@ def main(config_path):
         f.write(f"Accuracy: {accuracy:.4f}\n")
         f.write(f"TTA Enabled: {TTA_ENABLED}\n\n")
         f.write(report)
+        if hyp_report_str:
+            f.write("\n" + hyp_report_str)
     
     # Save confusion matrix
     cm_title = f"Confusion Matrix - {model_type} {'(with TTA)' if TTA_ENABLED else ''}"

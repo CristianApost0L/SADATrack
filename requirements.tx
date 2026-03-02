@@ -6,3 +6,6 @@ tqdm
 matplotlib
 scikit-learn
 pyyaml
+geoopt
+einops
+audioop-lts

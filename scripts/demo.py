@@ -77,7 +77,7 @@ def convert_to_bone(tensor_data):
             bone_data[:, 2:, :, child] = tensor_data[:, 2:, :, child]
     return bone_data
 
-def init_model(model_type, weights_path, num_classes, in_channels, device):
+def init_model(model_type, weights_path, num_classes, in_channels, device, use_hyperbolic=False):
     print(f"Loading {model_type} from {weights_path}...")
     
     if not os.path.exists(weights_path):
@@ -104,7 +104,7 @@ def init_model(model_type, weights_path, num_classes, in_channels, device):
     # Map 'HDGCN' -> HDGCN_Tennis, 'CTRGCN' -> CTRGCN_Tennis
     ModelClass = HDGCN_Tennis if model_type == 'HDGCN' else CTRGCN_Tennis
     
-    model = ModelClass(num_classes=num_classes, in_channels=in_channels)
+    model = ModelClass(num_classes=num_classes, in_channels=in_channels, use_hyperbolic=use_hyperbolic)
     model.load_state_dict(checkpoint)
     model.to(device)
     model.eval()
@@ -137,6 +137,7 @@ def main(args):
     idx_to_label = {v: k for k, v in label_map.items()}
     num_classes = len(label_map)
     model_type = model_config.get('type', 'HDGCN')
+    use_hyperbolic = model_config.get('use_hyperbolic', False)
     
     weights_paths = args.weights.split(',')
     modality = args.modality.lower()
@@ -145,12 +146,12 @@ def main(args):
     classifier_bone = None
     
     if modality == 'ensemble':
-        classifier_joint = init_model(model_type, weights_paths[0].strip(), num_classes, IN_CHANNELS, DEVICE)
-        classifier_bone = init_model(model_type, weights_paths[1].strip(), num_classes, IN_CHANNELS, DEVICE)
+        classifier_joint = init_model(model_type, weights_paths[0].strip(), num_classes, IN_CHANNELS, DEVICE, use_hyperbolic)
+        classifier_bone = init_model(model_type, weights_paths[1].strip(), num_classes, IN_CHANNELS, DEVICE, use_hyperbolic)
     elif modality == 'joint':
-        classifier_joint = init_model(model_type, weights_paths[0].strip(), num_classes, IN_CHANNELS, DEVICE)
+        classifier_joint = init_model(model_type, weights_paths[0].strip(), num_classes, IN_CHANNELS, DEVICE, use_hyperbolic)
     elif modality == 'bone':
-        classifier_bone = init_model(model_type, weights_paths[0].strip(), num_classes, IN_CHANNELS, DEVICE)
+        classifier_bone = init_model(model_type, weights_paths[0].strip(), num_classes, IN_CHANNELS, DEVICE, use_hyperbolic)
 
     print(f"Loading Pose Estimator ...")
     pose_model_path = args.pose_model if args.pose_model else POSE_MODEL_PATH
@@ -243,11 +244,29 @@ def main(args):
                     input_tensor = torch.tensor(input_seq_normalized).unsqueeze(0).to(DEVICE)
                     
                     probs = None
+                    hyp_dists = []
+                    
                     with torch.no_grad():
                         if classifier_joint:
-                            probs = F.softmax(classifier_joint(input_tensor), dim=1)
+                            if use_hyperbolic:
+                                out_joint, z_joint = classifier_joint(input_tensor, return_embeddings=True)
+                                probs = F.softmax(out_joint, dim=1)
+                                # Distance to origin in Poincare ball: arctanh(||z||)
+                                z_norm = torch.norm(z_joint, p=2, dim=1).clamp(max=0.99)
+                                hyp_dist = torch.arctanh(z_norm).item()
+                                hyp_dists.append(hyp_dist)
+                            else:
+                                probs = F.softmax(classifier_joint(input_tensor), dim=1)
+                                
                         if classifier_bone:
-                            probs_b = F.softmax(classifier_bone(convert_to_bone(input_tensor)), dim=1)
+                            if use_hyperbolic:
+                                out_b, z_b = classifier_bone(convert_to_bone(input_tensor), return_embeddings=True)
+                                probs_b = F.softmax(out_b, dim=1)
+                                z_b_norm = torch.norm(z_b, p=2, dim=1).clamp(max=0.99)
+                                hyp_dists.append(torch.arctanh(z_b_norm).item())
+                            else:
+                                probs_b = F.softmax(classifier_bone(convert_to_bone(input_tensor)), dim=1)
+                                
                             probs = probs_b if probs is None else (probs + probs_b) / 2.0
                     
                     if probs is not None:
@@ -256,25 +275,36 @@ def main(args):
                         top_loc = np.argmax(avg_probs)
                         top_conf = avg_probs[top_loc]
                         
-                        # Only update label if confidence is above threshold
+                        # Calculate average hyperbolic distance (uncertainty)
+                        avg_hyp_dist = np.mean(hyp_dists) if hyp_dists else float('inf')
+                        
+                        # We use hyperbolic radius as an uncertainty measure
+                        # A small radius means the embedding is close to the origin (high uncertainty/ambiguity)
+                        # A large radius means the embedding is confident and clear
+                        HYP_DIST_THRESHOLD = 0.5 # Hyperbolic distance threshold
+                        
                         if top_conf >= CONFIDENCE_THRESHOLD:
-                            last_label = idx_to_label[top_loc]
-                            last_conf = top_conf
+                            if use_hyperbolic and avg_hyp_dist < HYP_DIST_THRESHOLD:
+                                last_label = f"Uncertain (d={avg_hyp_dist:.2f})"
+                                last_conf = top_conf 
+                                last_color = (0, 165, 255) # Orange
+                            else:
+                                last_label = idx_to_label[top_loc]
+                                last_conf = top_conf
+                                last_color = (0, 255, 0) # Green
                         else:
                             # Low confidence - likely transition or no clear swing
                             last_label = "Uncertain"
                             last_conf = top_conf
+                            last_color = (0, 165, 255) # Orange
 
         # === VISUALIZATION (Runs Every Frame) ===
         # Uses last_* variables for persistent drawing
         if last_detected_pose is not None:
             norm, raw, confs, box = last_detected_pose
             
-            # Color based on prediction confidence
-            if last_conf >= CONFIDENCE_THRESHOLD:
-                color = (0, 255, 0)  # Green: High confidence
-            else:
-                color = (0, 165, 255)  # Orange: Low confidence
+            # Color based on confidence/uncertainty logic evaluated above
+            color = locals().get('last_color', (0, 165, 255))
             
             draw_skeleton(frame, raw[:, :2], confs, modality=modality, color=color)
             cv2.rectangle(frame, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), color, 2)

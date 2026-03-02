@@ -13,6 +13,9 @@ from abc import ABC, abstractmethod
 # Import COCO constants
 from .constants import COCO_NUM_JOINTS, COCO_CENTER_OF_MASS
 
+# Import Hyperbolic MLR
+from .hyperbolic import HyperbolicMLR
+
 # =============================================================================
 # Import Management (Required due to HD-GCN/CTR-GCN module conflicts)
 # =============================================================================
@@ -272,19 +275,21 @@ class BaseTennisGCN(nn.Module, ABC):
     - Forward pass template
     """
     
-    def __init__(self, num_classes, in_channels=3, drop_out=0, data_type='joint'):
+    def __init__(self, num_classes, in_channels=3, drop_out=0, data_type='joint', use_hyperbolic=False):
         """
         Args:
             num_classes: Number of tennis swing classes
             in_channels: Input channels (3 for x,y,conf or 4 for x,y,z,conf)
             drop_out: Dropout rate
             data_type: 'joint' or 'bone' (for logging/documentation only)
+            use_hyperbolic: Whether to use hyperbolic classification
         """
         super(BaseTennisGCN, self).__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.drop_out = drop_out
         self.data_type = data_type
+        self.use_hyperbolic = use_hyperbolic
         self.model = None  # Set by subclass
     
     @abstractmethod
@@ -309,15 +314,17 @@ class BaseTennisGCN(nn.Module, ABC):
         model_type = self.__class__.__name__.replace('_Tennis', '').lower()
         return f"{model_type}_{self.data_type}"
     
-    def forward(self, x):
+    def forward(self, x, return_embeddings=False):
         """
         Forward pass with automatic input formatting.
         
         Args:
             x: Input tensor (N, C, T, V) or (N, C, T, V, M)
+            return_embeddings: If True, also return the projected Poincare embeddings
             
         Returns:
             Class logits (N, num_classes)
+            (optional) Poincare embeddings (N, in_features)
         """
         # Ensure 5D input: (N, C, T, V, M)
         if x.dim() == 4:
@@ -327,6 +334,12 @@ class BaseTennisGCN(nn.Module, ABC):
         if x.shape[1] > self.in_channels:
             x = x[:, :self.in_channels, :, :, :]
             
+        if return_embeddings and self.use_hyperbolic:
+            # Check if model supports returning embeddings
+            import inspect
+            if 'return_embeddings' in inspect.signature(self.model.forward).parameters:
+                return self.model(x, return_embeddings=True)
+                
         return self.model(x)
 # =============================================================================
 # HD-GCN Model
@@ -363,7 +376,7 @@ class HDGCN_Tennis(BaseTennisGCN):
             data_type: 'joint' or 'bone' representation (for logging/documentation)
             **kwargs: Additional arguments (ignored, kept for compatibility)
         """
-        super(HDGCN_Tennis, self).__init__(num_classes, in_channels, drop_out, data_type)
+        super(HDGCN_Tennis, self).__init__(num_classes, in_channels, drop_out, data_type, kwargs.get('use_hyperbolic', False))
         self._build_model()
     
     def _build_model(self):
@@ -399,6 +412,11 @@ class HDGCN_Tennis(BaseTennisGCN):
             in_channels=self.in_channels,
             drop_out=self.drop_out
         )
+        
+        # Replace final layer with HyperbolicMLR if requested
+        if self.use_hyperbolic:
+            in_features = self.model.fc.in_features
+            self.model.fc = HyperbolicMLR(in_features, self.num_classes, c=1.0)
 
 
 # =============================================================================
@@ -435,7 +453,7 @@ class CTRGCN_Tennis(BaseTennisGCN):
             data_type: 'joint' or 'bone' representation (for logging/documentation)
             **kwargs: Additional arguments (ignored, kept for compatibility)
         """
-        super(CTRGCN_Tennis, self).__init__(num_classes, in_channels, drop_out, data_type)
+        super(CTRGCN_Tennis, self).__init__(num_classes, in_channels, drop_out, data_type, kwargs.get('use_hyperbolic', False))
         self._build_model()
     
     def _build_model(self):
@@ -465,3 +483,8 @@ class CTRGCN_Tennis(BaseTennisGCN):
             drop_out=self.drop_out,
             adaptive=True                     # Enable adaptive graph learning
         )
+
+        # Replace final layer with HyperbolicMLR if requested
+        if self.use_hyperbolic:
+            in_features = self.model.fc.in_features
+            self.model.fc = HyperbolicMLR(in_features, self.num_classes, c=1.0)

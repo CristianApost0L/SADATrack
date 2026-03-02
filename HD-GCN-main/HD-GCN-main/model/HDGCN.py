@@ -219,7 +219,8 @@ class EdgeConv(nn.Module):
         N, C, V = x.size()
         if idx is None:
             idx = self.knn(x, k=k)
-        device = x.get_device()
+            
+        device = x.device
         
         idx_base = torch.arange(0, N, device=device).view(-1, 1, 1) * V
         
@@ -441,7 +442,7 @@ class Model(nn.Module):
         else:
             self.drop_out = lambda x: x
 
-    def forward(self, x):
+    def forward(self, x, return_embeddings=False):
         N, C, T, V, M = x.size()
         x = rearrange(x, 'n c t v m -> n (m v c) t')
         x = self.data_bn(x)
@@ -464,4 +465,6 @@ class Model(nn.Module):
         x = x.mean(3).mean(1)
         x = self.drop_out(x)
 
+        if return_embeddings and hasattr(self.fc, 'forward') and 'return_embeddings' in self.fc.forward.__code__.co_varnames:
+            return self.fc(x, return_embeddings=True)
         return self.fc(x) 

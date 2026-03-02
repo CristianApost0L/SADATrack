@@ -307,7 +307,7 @@ class Model(nn.Module):
         else:
             self.drop_out = lambda x: x
 
-    def forward(self, x):
+    def forward(self, x, return_embeddings=False):
         if len(x.shape) == 3:
             N, T, VC = x.shape
             x = x.view(N, T, self.num_point, -1).permute(0, 3, 1, 2).contiguous().unsqueeze(-1)
@@ -333,4 +333,6 @@ class Model(nn.Module):
         x = x.mean(3).mean(1)
         x = self.drop_out(x)
 
+        if return_embeddings and hasattr(self.fc, 'forward') and 'return_embeddings' in self.fc.forward.__code__.co_varnames:
+            return self.fc(x, return_embeddings=True)
         return self.fc(x)
