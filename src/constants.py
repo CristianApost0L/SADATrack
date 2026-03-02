@@ -57,6 +57,9 @@ SKELETON_CONNECTIONS = [
     (5, 0), (6, 0), (1, 0), (2, 0), (3, 1), (4, 2)    # Head
 ]
 
+# Alias to follow COCO naming convention (same as SKELETON_CONNECTIONS)
+COCO_CONNECTIONS = SKELETON_CONNECTIONS
+
 # Mapping from class name to label index
 LABEL_MAP = {cls_name: i for i, cls_name in enumerate(THETIS_CLASSES)}
 

@@ -15,7 +15,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.normalization import normalize_skeleton
 from src.dataset import get_thetis_files, THETIS_CLASSES
 from src.extractor import PoseExtractor
-from src.constants import SKELETON_CONNECTIONS
+from src.constants import SKELETON_CONNECTIONS, COCO_CONNECTIONS
 from ultralytics import YOLO
 
 def load_config(config_path):
@@ -113,17 +113,16 @@ def visualize_validation(video_path, extractor, confidence_thresh=0.25, output_d
     ax2.axhline(0, color='gray', linewidth=0.5)
     ax2.axvline(0, color='gray', linewidth=0.5)
     ax2.set_aspect('equal')
-    ax2.set_xlim(-1.0, 1.0)
-    ax2.set_ylim(-1.0, 1.0)
+    ax2.set_xlim(-2.5, 2.5)
+    ax2.set_ylim(-2.5, 2.5)
     ax2.grid(True)
     ax2.axhline(0, color='black', lw=1)
     ax2.axvline(0, color='black', lw=1)
     
+    
     lines_norm = [ax2.plot([], [], 'b-', linewidth=2)[0] for _ in SKELETON_CONNECTIONS]
     points_norm = ax2.scatter([], [], c='r', s=20)
-    
-    # Testo info
-    info_text = ax2.text(-0.9, 0.9, "", fontsize=9)
+    info_text = ax2.text(-2.2, 2.2, "", fontsize=9)
 
     def update(frame_idx):
         # Update Video
@@ -358,7 +357,7 @@ def main(config_path, mode='video', output_dir=None, num_videos=None, process_al
     print(f"  - Sequence length: {SEQ_LEN}")
     print(f"  - Num joints: {NUM_JOINTS}")
     print(f"  - Confidence threshold: {CONFIDENCE_THRESH}")
-    print(f"  - Visualization: 2D only (MotionBERT removed)")
+    print(f"  - Visualization: 2D only")
     
     if not os.path.exists(MODEL_YOLO_PATH):
         print(f"\n⚠ Warning: Model path '{MODEL_YOLO_PATH}' not found!")

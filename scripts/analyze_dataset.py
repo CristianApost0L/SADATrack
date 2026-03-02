@@ -5,9 +5,10 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from constants import COCO_JOINT_NAMES
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from src.constants import COCO_JOINT_NAMES
 
 def load_config(config_path):
     """Load YAML configuration file"""
